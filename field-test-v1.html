@@ -1347,13 +1347,14 @@ out geom;`;
       }
     }
     // ── RING-SPIRAL DISTRIBUTION ──────────────────────────────────────────
-    // Front-loaded schedule: 3 starter anchors in the first 200m, then tapers.
-    // First 3 quests are an easy lap. Next 4 are walkable in a session.
-    // Final 5 require deliberate exploration. Total: up to 12 anchors over 1600m.
+    // Schedule: 3 starter anchors close, then a steady mid-band, then a
+    // weighted outer band so the wagon-wheel rim is dense rather than sparse.
+    // Phase 1 of spacedAnchors places one coverage anchor per compass sector
+    // at the 400m horizon; Phase 2 fills the inner schedule. Total 18 / 1600m.
     const allCandidates = [...anchorCenters, ...synthCandidates];
     const spaced = spacedAnchors(allCandidates, lat, lng, {
       ringWidth: 200,
-      anchorsPerRing: [3, 2, 2, 1, 1, 1, 1, 1],
+      anchorsPerRing: [3, 2, 2, 1, 2, 2, 3, 3],
       minDistM: 60,
       maxPerRoad: 2,
       coverageMinDistM: 400,
