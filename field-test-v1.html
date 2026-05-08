@@ -1005,12 +1005,16 @@ function spacedAnchors(candidates, originLat, originLng, opts) {
     }
     for (const bin of sectorBins) bin.sort((a, b) => distFromOrigin(a) - distFromOrigin(b));
 
-    // Pass 1: round-robin sectors with per-road cap
+    // Pass 1: round-robin sectors with per-road cap.
+    // Rotate the starting sector by ring index so quotas < 8 don't always
+    // pick the same compass points — over 8 rings every sector starts once.
+    const startOffset = r % SECTORS;
     let ringPicks = 0;
     let progressed = true;
     while (progressed && ringPicks < ringQuota) {
       progressed = false;
-      for (let s = 0; s < SECTORS && ringPicks < ringQuota; s++) {
+      for (let i = 0; i < SECTORS && ringPicks < ringQuota; i++) {
+        const s = (i + startOffset) % SECTORS;
         const bin = sectorBins[s];
         while (bin.length > 0) {
           const c = bin.shift();
