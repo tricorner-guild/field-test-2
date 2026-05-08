@@ -1,0 +1,1796 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,viewport-fit=cover">
+<title>AMBRÔUGH — Forest Expedition</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#060e03;--bg2:#0d1a08;--border:#2a5010;
+  --gold:#c8b060;--gold2:#e8d080;
+  --green:#2a6a18;--green2:#4aaa30;
+  --text:#e8e4c0;--text2:#b8cc90;
+  --panel:rgba(6,14,3,.97);
+}
+html,body{height:100%;overflow:hidden;background:var(--bg);font-family:'Courier New',monospace;color:var(--text)}
+
+/* ── MAP ─────────────────────────────────────────────── */
+#map{
+  position:fixed;inset:0;z-index:0;
+  background-color:#415c30; /* solid meadow ground */
+}
+.leaflet-control-attribution{display:none}
+.leaflet-control-zoom{display:none}
+
+/* player marker */
+.player-dot{
+  width:14px;height:14px;
+  background:var(--gold);border:2px solid var(--gold2);
+  border-radius:50%;
+  box-shadow:0 0 10px var(--gold),0 0 20px rgba(200,176,96,.4);
+  animation:player-pulse 2s ease-in-out infinite;
+}
+@keyframes player-pulse{0%,100%{box-shadow:0 0 8px var(--gold)}50%{box-shadow:0 0 18px var(--gold),0 0 30px rgba(200,176,96,.5)}}
+
+/* anchor markers */
+.anchor-dot{
+  width:16px;height:16px;
+  background:var(--green);border:2px solid var(--green2);
+  border-radius:50%;
+  position:relative;
+  animation:anchor-pulse 2.4s ease-in-out infinite;
+}
+.anchor-dot::after{
+  content:'';position:absolute;inset:-5px;border-radius:50%;
+  border:2px solid var(--green2);
+  animation:anchor-ring 2.4s ease-out infinite;
+}
+@keyframes anchor-pulse{0%,100%{transform:scale(1);opacity:.9}50%{transform:scale(1.15);opacity:1}}
+@keyframes anchor-ring{0%{transform:scale(.7);opacity:.7}100%{transform:scale(2.2);opacity:0}}
+.anchor-dot.visited{
+  background:#1a3a10;border-color:#2a5a18;
+  animation:none;opacity:.4;
+}
+.anchor-dot.visited::after{display:none}
+.anchor-dot.nearby{border-color:var(--gold);background:#3a6a10;animation:nearby-pulse 1s ease-in-out infinite}
+@keyframes nearby-pulse{0%,100%{box-shadow:0 0 0 0 rgba(200,176,96,.5)}50%{box-shadow:0 0 0 8px rgba(200,176,96,0)}}
+
+/* quest direction arrow */
+.arrow-marker{
+  width:24px;height:24px;
+  background:none;
+  display:flex;align-items:center;justify-content:center;
+  position:relative;
+}
+.arrow-marker svg{
+  width:100%;height:100%;
+  filter:drop-shadow(0 0 6px var(--gold2)) drop-shadow(0 0 12px rgba(232,208,128,.6));
+}
+
+/* ── TITLE SCREEN ────────────────────────────────────── */
+#title-screen{
+  position:fixed;inset:0;z-index:200;
+  background:var(--bg);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;
+  padding:40px 30px max(env(safe-area-inset-bottom),40px);
+}
+#title-screen.hidden{display:none}
+.title-rune{font-size:13px;letter-spacing:8px;color:var(--green2);text-transform:uppercase;margin-bottom:8px}
+.title-main{font-size:34px;letter-spacing:6px;color:var(--gold);text-transform:uppercase;line-height:1.1;text-align:center}
+.title-sub{font-size:12px;letter-spacing:4px;color:var(--text2);text-transform:uppercase}
+.title-divider{width:120px;height:1px;background:var(--border);margin:8px 0}
+.title-flavor{
+  font-size:14px;color:var(--text2);line-height:1.9;
+  max-width:300px;text-align:center;letter-spacing:.5px;
+}
+#btn-begin{
+  margin-top:16px;
+  background:var(--bg2);border:1px solid var(--green2);color:var(--gold);
+  font-family:'Courier New',monospace;font-size:13px;letter-spacing:4px;
+  padding:18px 40px;cursor:pointer;text-transform:uppercase;
+  transition:all .2s;
+}
+#btn-begin:active{background:var(--green);color:var(--bg)}
+#btn-begin:disabled{opacity:.35;cursor:not-allowed;border-color:var(--border);color:var(--text2)}
+#btn-getloc{
+  margin-top:8px;
+  background:transparent;border:1px solid var(--border);color:var(--text2);
+  font-family:'Courier New',monospace;font-size:12px;letter-spacing:3px;
+  padding:14px 30px;cursor:pointer;text-transform:uppercase;
+  transition:all .2s;
+}
+#btn-getloc:active{background:var(--bg2);color:var(--gold)}
+#btn-getloc.success{border-color:var(--green2);color:var(--green2)}
+#btn-getloc.error{border-color:#c07040;color:#e09060}
+#loc-status{font-size:11px;letter-spacing:2px;color:var(--text2);text-transform:uppercase;text-align:center;margin-top:6px;min-height:16px;max-width:300px;line-height:1.7}
+#loc-status.success{color:var(--green2)}
+#loc-status.error{color:#e09060}
+.title-note{font-size:10px;letter-spacing:1px;color:#7a9a58;text-transform:uppercase;text-align:center;max-width:280px;line-height:2}
+
+/* ── HUD ─────────────────────────────────────────────── */
+#hud{
+  position:fixed;top:max(env(safe-area-inset-top),14px);right:14px;
+  z-index:50;display:flex;flex-direction:column;align-items:flex-end;gap:6px;
+}
+#hud.hidden{display:none}
+.hud-chip{
+  background:var(--panel);border:1px solid var(--border);
+  padding:9px 14px;font-size:11px;letter-spacing:2px;color:var(--text2);
+  display:flex;align-items:center;gap:8px;text-transform:uppercase;
+}
+.hud-val{font-size:15px;color:var(--gold);letter-spacing:0;font-weight:bold}
+.hud-label{opacity:.85}
+
+/* re-center button */
+#btn-center{
+  position:fixed;bottom:max(env(safe-area-inset-bottom),90px);right:14px;
+  z-index:50;background:var(--panel);border:1px solid var(--border);
+  color:var(--text2);font-size:18px;width:42px;height:42px;
+  cursor:pointer;display:flex;align-items:center;justify-content:center;
+  transition:border-color .2s, color .2s;
+}
+#btn-center.hidden{display:none}
+#btn-center.free-camera{
+  border-color:var(--gold);color:var(--gold);
+  animation:center-pulse 1.4s ease-in-out infinite;
+}
+@keyframes center-pulse{
+  0%,100%{box-shadow:0 0 0 0 rgba(200,176,96,.5)}
+  50%{box-shadow:0 0 0 7px rgba(200,176,96,0)}
+}
+
+/* map mode zoom controls */
+#map-zoom-controls{
+  position:fixed;bottom:max(env(safe-area-inset-bottom),90px);left:14px;
+  z-index:50;display:none;flex-direction:column;gap:4px;
+}
+#map-zoom-controls.visible{display:flex}
+.map-zoom-btn{
+  background:var(--panel);border:1px solid var(--border);
+  color:var(--text2);font-size:22px;width:42px;height:42px;
+  cursor:pointer;display:flex;align-items:center;justify-content:center;
+  transition:border-color .15s,color .15s;
+}
+.map-zoom-btn:active{border-color:var(--gold);color:var(--gold)}
+
+/* top-left button bar (view map + dev) */
+#top-left-bar{
+  position:fixed;top:max(env(safe-area-inset-top),14px);left:14px;
+  z-index:50;display:none;flex-direction:row;align-items:center;gap:6px;
+}
+#top-left-bar.visible{display:flex}
+#btn-viewmap{
+  background:var(--panel);border:1px solid var(--border);
+  color:var(--text2);font-family:'Courier New',monospace;font-size:11px;
+  letter-spacing:2px;padding:10px 14px;text-transform:uppercase;
+  cursor:pointer;display:flex;align-items:center;gap:6px;
+  transition:border-color .2s,color .2s;white-space:nowrap;
+}
+#btn-viewmap.active{border-color:var(--gold);color:var(--gold)}
+#btn-dev{
+  background:var(--panel);border:1px solid var(--border);
+  color:var(--text2);font-family:'Courier New',monospace;font-size:11px;
+  letter-spacing:2px;padding:10px 14px;text-transform:uppercase;
+  cursor:pointer;transition:border-color .2s,color .2s;white-space:nowrap;
+}
+#btn-dev.fog-off{border-color:#c07040;color:#e09060}
+
+/* ── LOADING OVERLAY ─────────────────────────────────── */
+#loading{
+  position:fixed;inset:0;z-index:100;
+  background:rgba(6,14,3,.88);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;
+}
+#loading.hidden{display:none}
+.loading-ring{
+  width:44px;height:44px;border:2px solid var(--border);border-top-color:var(--green);
+  border-radius:50%;animation:spin .9s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-text{font-size:11px;letter-spacing:4px;color:var(--text2);text-transform:uppercase}
+
+/* ── QUEST POPUP ─────────────────────────────────────── */
+#quest-popup{
+  position:fixed;bottom:0;left:0;right:0;z-index:80;
+  background:var(--panel);border-top:1px solid var(--border);
+  padding:28px 24px max(env(safe-area-inset-bottom),28px);
+  transform:translateY(100%);transition:transform .35s cubic-bezier(.32,.72,0,1);
+}
+#quest-popup.open{transform:translateY(0)}
+.qp-eyebrow{font-size:10px;letter-spacing:3px;color:var(--green2);text-transform:uppercase;margin-bottom:12px}
+.qp-title{font-size:20px;letter-spacing:2px;color:var(--text);margin-bottom:12px}
+.qp-flavor{font-size:13px;color:var(--text2);line-height:2;letter-spacing:.5px;margin-bottom:24px}
+.qp-distance{font-size:10px;letter-spacing:2px;color:#7aaa50;text-transform:uppercase;margin-bottom:20px}
+.qp-actions{display:flex;gap:10px}
+#btn-investigate{
+  flex:1;background:var(--green);border:1px solid var(--green2);
+  color:var(--text);font-family:'Courier New',monospace;font-size:11px;
+  letter-spacing:2px;padding:16px;cursor:pointer;text-transform:uppercase;
+}
+#btn-investigate:active{background:var(--green2)}
+#btn-walkaway{
+  flex:1;background:none;border:1px solid var(--border);
+  color:var(--text2);font-family:'Courier New',monospace;font-size:11px;
+  letter-spacing:2px;padding:16px;cursor:pointer;text-transform:uppercase;
+}
+#btn-walkaway:active{border-color:var(--text2)}
+.reward-flash{
+  position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+  font-size:18px;letter-spacing:4px;color:var(--gold);
+  text-transform:uppercase;pointer-events:none;
+  animation:reward-anim .8s ease-out forwards;z-index:200;
+}
+@keyframes reward-anim{0%{opacity:1;transform:translate(-50%,-60%)}100%{opacity:0;transform:translate(-50%,-110%)}}
+
+/* ── TOAST ───────────────────────────────────────────── */
+#toast{
+  position:fixed;top:max(env(safe-area-inset-top),60px);left:50%;
+  transform:translateX(-50%);
+  background:var(--panel);border:1px solid var(--border);
+  color:var(--text2);font-size:11px;letter-spacing:2px;
+  padding:12px 20px;text-transform:uppercase;z-index:150;
+  opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap;
+}
+#toast.show{opacity:1}
+
+/* ── STATUS BAR ──────────────────────────────────────── */
+#status-bar{
+  position:fixed;bottom:0;left:0;right:0;
+  background:var(--panel);border-top:1px solid var(--border);
+  padding:10px 16px max(env(safe-area-inset-bottom),10px);
+  z-index:50;display:flex;align-items:center;gap:8px;
+}
+#status-bar.hidden{display:none}
+.sb-dot{width:6px;height:6px;border-radius:50%;background:var(--green2);animation:anchor-pulse 2s infinite}
+.sb-text{font-size:11px;letter-spacing:2px;color:var(--text2);text-transform:uppercase}
+.sb-count{font-size:11px;letter-spacing:1px;color:var(--green2);margin-left:auto}
+
+/* ── FOREST CANVAS — pixel cluster renderer ──────────────────── */
+#forest-canvas {
+  position: absolute;
+  top: 0; left: 0;
+  z-index: 450;          /* above Leaflet overlay pane (400) so trees bleed over roads */
+  pointer-events: none;
+}
+</style>
+</head>
+
+<body>
+
+<div id="map"></div>
+
+<!-- Title screen -->
+<div id="title-screen">
+  <div class="title-rune">◈ Field Prototype ◈</div>
+  <div class="title-main">AMBRÔUGH</div>
+  <div class="title-sub">Forest Expedition</div>
+  <div class="title-divider"></div>
+  <div class="title-flavor">The forest does not wait for you. It has been here long before the roads, and it will be here long after.</div>
+  <button id="btn-getloc">◉ Get Location</button>
+  <div id="loc-status"></div>
+  <button id="btn-begin" disabled>⬡ Begin Expedition</button>
+  <div class="title-note">Requires location permission · Works best outdoors · Walk to green anchors to trigger encounters</div>
+</div>
+
+<!-- Loading -->
+<div id="loading" class="hidden">
+  <div class="loading-ring"></div>
+  <div class="loading-text">Entering the forest…</div>
+</div>
+
+<!-- HUD -->
+<div id="hud" class="hidden">
+  <div class="hud-chip"><span class="hud-label">Gold</span><span class="hud-val" id="hud-gold">0</span></div>
+  <div class="hud-chip"><span class="hud-label">Quests</span><span class="hud-val" id="hud-quests">0</span></div>
+</div>
+
+<!-- Re-center -->
+<button id="btn-center" class="hidden" title="Re-center">◎</button>
+
+<!-- Top-left bar: View Map + Dev -->
+<div id="top-left-bar">
+  <button id="btn-viewmap">⊙ View Map</button>
+  <button id="btn-dev">Dev</button>
+</div>
+
+<!-- Map mode zoom controls (only visible in map mode) -->
+<div id="map-zoom-controls">
+  <button class="map-zoom-btn" id="btn-zoom-in">+</button>
+  <button class="map-zoom-btn" id="btn-zoom-out">−</button>
+</div>
+
+<!-- Status bar -->
+<div id="status-bar" class="hidden">
+  <div class="sb-dot"></div>
+  <div class="sb-text" id="sb-text">Locating…</div>
+  <div class="sb-count" id="sb-count"></div>
+</div>
+
+<!-- Quest popup -->
+<div id="quest-popup">
+  <div class="qp-eyebrow">Forest Encounter</div>
+  <div class="qp-title" id="qp-title">—</div>
+  <div class="qp-flavor" id="qp-flavor">—</div>
+  <div class="qp-distance" id="qp-distance"></div>
+  <div class="qp-actions">
+    <button id="btn-investigate">Investigate · +3 ◈</button>
+    <button id="btn-walkaway">Walk Away</button>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ══════════════════════════════════════════════
+// ENCOUNTERS
+// ══════════════════════════════════════════════
+const ENCOUNTERS = [
+  { title:'A Fallen Deer',        flavor:'The animal lies still, its side no longer rising. A black-feathered arrow protrudes from its flank. Someone else was here first.' },
+  { title:'Carved Runes',         flavor:'Three flat stones in a triangle, each bearing the same mark. The moss has grown around them — not over them.' },
+  { title:'An Abandoned Fire',    flavor:'Ash, still warm. The bedroll is gone but a clay cup remains, half-full of something that isn\'t water.' },
+  { title:'The Bone Circle',      flavor:'Small bones, white and clean, arranged in a careful ring around an oak\'s base. Bird bones, mostly. Mostly.' },
+  { title:'A Torn Cloak',         flavor:'Heavy wool, forest-coloured. One sleeve is missing. The remaining fabric bears a sigil you don\'t recognise.' },
+  { title:'Strange Mushrooms',    flavor:'They ring a clearing in a perfect circle, each cap upturned like an open hand. None of the surrounding grass is growing.' },
+  { title:'Glinting Water',       flavor:'A small spring hidden beneath a shelf of moss. Coins on the bottom — copper mostly, but something gold catches the light.' },
+  { title:'A Child\'s Boot',      flavor:'Small, soft leather, laces intact. No sign of struggle. No sign of anything.' },
+  { title:'Marked Tree',          flavor:'A deep X carved into the bark, three years old at least. Below it, freshly cut: a second X.' },
+  { title:'Scattered Pages',      flavor:'Parchment, rain-soaked. The ink has run everywhere except the last line, which reads clearly: don\'t come back.' },
+  { title:'A Rusted Lock',        flavor:'The chain it was attached to is long gone. The lock is open, key still in it, hanging from a low branch.' },
+  { title:'Sleeping Fox',         flavor:'Curled tight at the root of a birch, breathing steady. It doesn\'t wake when you approach. It doesn\'t wake at all.' },
+  { title:'The Empty Trap',       flavor:'A hunter\'s snare, sprung but empty. The ground is disturbed — something escaped. Something large.' },
+  { title:'Feathers and Fury',    flavor:'A tangle of owl and crow feathers. One of them won. Hard to say which.' },
+  { title:'Buried Offering',      flavor:'Freshly turned earth beneath a rock cairn. You don\'t dig. You know better. You take the coin left on top.' },
+  { title:'A Broken Compass',     flavor:'Brass casing, cracked glass. The needle still spins — but it doesn\'t point north. It points back the way you came.' },
+  { title:'Ashes in the Shape of a Man', flavor:'A rough outline in grey ash on a flat stone. No fire pit. No fuel. The ash is cold and perfectly still despite the wind.' },
+  { title:'The Watching Stone',   flavor:'A boulder you\'ve passed a dozen times. Today there is a face carved into it. Old work. Eyes open.' },
+  { title:'A Letter, Undelivered',flavor:'Wax-sealed, addressed in a clean hand. The name is smudged beyond reading. The seal is intact. You leave it intact.' },
+  { title:'Three Coins',          flavor:'Copper, silver, gold — standing upright in the soil in a line, evenly spaced, facing the same direction. Someone did this carefully.' },
+];
+
+// ══════════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════════
+const SAVE_KEY = 'ambrogh_field_v1';
+let state = { gold: 0, completed: {} };
+
+function loadState() {
+  try { const s = JSON.parse(localStorage.getItem(SAVE_KEY)); if(s) state = {...state,...s}; } catch(e){}
+}
+function saveState() {
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(state)); } catch(e) {}
+}
+
+// ══════════════════════════════════════════════
+// UTILS
+// ══════════════════════════════════════════════
+function hashStr(s) {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = (Math.imul(31,h) + s.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+function getEncounter(anchorId) {
+  return ENCOUNTERS[hashStr(String(anchorId)) % ENCOUNTERS.length];
+}
+function distMetres(a, b) {
+  return map ? map.distance(a, b) : L.latLng(a).distanceTo(L.latLng(b));
+}
+function fmtDist(m) {
+  const ft = m * 3.28084;
+  if (ft < 1000) return Math.round(ft / 10) * 10 + ' ft';
+  const mi = m / 1609.34;
+  return mi < 10 ? mi.toFixed(1) + ' mi' : Math.round(mi) + ' mi';
+}
+
+let toastTimer;
+function showToast(msg, dur=2800) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), dur);
+}
+
+function flashReward(text) {
+  const el = document.createElement('div');
+  el.className = 'reward-flash';
+  el.textContent = text;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 900);
+}
+
+// ══════════════════════════════════════════════
+// MAP + LEAFLET
+// ══════════════════════════════════════════════
+let map, playerMarker;
+let waterLayer;
+let anchors = [];             // { id, latlng, el, enc, visited }
+let lastQueryCenter = null;
+let activeAnchor = null;
+let playerPos = null;
+let followMode = true;
+let viewMapMode = false;      // overview zoom-out mode
+let visitedPath = [];         // array of {lat, lng} for fog of war
+let lastVisitPos = null;      // track distance to reduce GPS noise in path recording
+let forestCanvas = null;      // pixel-cluster forest canvas (inside #map)
+let forestCtx = null;
+let forestBlobs = [];         // lat/lng polygons waiting to be rasterized
+let roadPolys  = [];          // lat/lng polygons for dithered road rendering (on canvas)
+
+// ── FOREST PIXEL-CLUSTER CONSTANTS ──
+const FOREST_PIXEL = 6;       // cell size in screen px
+const FOREST_BAND  = 10;      // total dither band in cells
+const FOREST_EDGE  = '#2e4a26';   // outer band color
+const FOREST_MID   = '#233d1e';   // inner band color
+const FOREST_CORE  = '#1a3010';   // solid interior color
+const FOREST_BAYER = [
+  [ 0,  8,  2, 10],
+  [12,  4, 14,  6],
+  [ 3, 11,  1,  9],
+  [15,  7, 13,  5]
+];
+const QUERY_RADIUS = 1600;   // metres — 1 mile fetch radius
+const QUERY_RETRIGGER = 400; // metres — retrigger when walked ~0.25mi from last fetch
+const QUEST_RADIUS = 15;     // metres — must physically walk to the quest
+const VISIT_SAMPLE_DIST = 15; // metres — distance between recorded path points
+const VISIT_RADIUS = 40;     // metres — visibility radius from current position
+
+function setFollowMode(on) {
+  followMode = on;
+  const btn = document.getElementById('btn-center');
+  if (on) btn.classList.remove('free-camera');
+  else btn.classList.add('free-camera');
+}
+
+function initMap(lat, lng) {
+  map = L.map('map', {
+    center: [lat, lng],
+    zoom: 20,
+    minZoom: 14,
+    maxZoom: 20,
+    zoomControl: false,
+    attributionControl: false,
+    preferCanvas: false, // SVG renderer for crisp polygons
+    dragging: false,
+    scrollWheelZoom: false,
+    touchZoom: false,
+    doubleClickZoom: false,
+    keyboard: false,
+    boxZoom: false,
+    tap: false,
+  });
+
+  // Forest canvas — pixel-cluster renderer.
+  // z-index 450: above overlay pane (400, roads) so tree pixels bleed over road edges.
+  // Water gets its own pane at 500 so rivers/ponds still draw above the forest.
+  const fc = document.createElement('canvas');
+  fc.id = 'forest-canvas';
+  document.getElementById('map').appendChild(fc);
+  forestCanvas = fc;
+  forestCtx = fc.getContext('2d');
+
+  // Custom panes sit between the overlay pane (400) and marker pane (600).
+  // Forest canvas is at z-450 so trees bleed over road edges organically.
+  // Roads pane (z-480) draws roads back ON TOP of forest — with organic jitter polygon edges.
+  // Water pane (z-500) keeps rivers/ponds visible above forest and roads.
+  // NOTE: each L.polygon must be given pane:'roadPane'/'waterPane' explicitly —
+  //       featureGroup does NOT propagate its pane to child layers.
+  const roadPaneEl = map.createPane('roadPane');
+  roadPaneEl.style.zIndex = 480;
+  roadPaneEl.style.pointerEvents = 'none';
+  const waterPaneEl = map.createPane('waterPane');
+  waterPaneEl.style.zIndex = 500;
+  waterPaneEl.style.pointerEvents = 'none';
+
+  // No tile layer — #map background is solid meadow green.
+  // Layer z-order (bottom to top):
+  //   meadow bg → overlay (400) → forest canvas (450) → roadPane (480) → waterPane (500) → markers (600)
+  // Roads + forest are drawn on the canvas (forestCanvas), not as Leaflet polygons.
+  // Anchors + player are fixed-position DOM dots managed manually.
+  waterLayer = L.featureGroup().addTo(map);  // water polygons — added with pane:'waterPane'
+
+  // Initialize fog of war (custom canvas-backed Leaflet layer)
+  initFogLayer();
+
+  // Player dot — fixed body element so it sits above EVERYTHING (canvas, fog, UI).
+  // #map is z-index:0 stacking context so Leaflet markers are buried at root z-0.
+  // Anchors are at z-35; player must be higher than all of them.
+  const playerEl = document.createElement('div');
+  playerEl.className = 'player-dot';
+  playerEl.style.cssText = 'position:fixed;z-index:200;width:14px;height:14px;margin-left:-7px;margin-top:-7px;pointer-events:none;display:none';
+  document.body.appendChild(playerEl);
+  playerMarker = playerEl;  // re-use playerMarker var; we'll position it manually
+
+  // Keep anchor DOM positions synced with map movement
+  map.on('move zoom moveend zoomend', updateAnchorDOMPositions);
+  map.on('move zoom moveend zoomend', updatePlayerDotPos);
+  // Re-rasterize forest pixel clusters whenever the viewport shifts or zooms
+  map.on('moveend zoomend', renderForest);
+
+  // Re-center button — returns to player position at full zoom
+  document.getElementById('btn-center').addEventListener('click', () => {
+    setFollowMode(true);
+    if (playerPos) map.flyTo(playerPos, 20, { duration: 0.5 });
+  });
+}
+
+function addAnchor(id, lat, lng) {
+  if (anchors.find(a => a.id === id)) return; // dedupe
+  const latlng = L.latLng(lat, lng);
+  const isVisited = !!state.completed[id];
+  const enc = getEncounter(id);
+
+  // Render as a fixed body element so it sits above the fog canvas (z-index 35)
+  const el = document.createElement('div');
+  el.className = isVisited ? 'anchor-dot visited' : 'anchor-dot';
+  el.style.cssText = 'position:fixed;z-index:35;width:16px;height:16px;margin-left:-8px;margin-top:-8px;cursor:pointer;display:none';
+  document.body.appendChild(el);
+
+  el.addEventListener('click', () => {
+    if (!isVisited && playerPos) {
+      const dist = distMetres(playerPos, latlng);
+      showToast(`${enc.title} — ${fmtDist(dist)} away`);
+    }
+  });
+
+  anchors.push({ id, latlng, el, enc, visited: isVisited });
+}
+
+function clearAnchorDOMs() {
+  for (const a of anchors) {
+    if (a.el && a.el.parentNode) a.el.parentNode.removeChild(a.el);
+  }
+}
+
+function updatePlayerDotPos() {
+  if (!playerMarker || !map || !playerPos) return;
+  const pt = map.latLngToContainerPoint(playerPos);
+  playerMarker.style.left = Math.round(pt.x) + 'px';
+  playerMarker.style.top  = Math.round(pt.y) + 'px';
+  playerMarker.style.display = '';
+}
+
+function updateAnchorDOMPositions() {
+  if (!map) return;
+  const W = window.innerWidth, H = window.innerHeight;
+  const pad = 30;
+  for (const a of anchors) {
+    if (!a.el) continue;
+    const pt = map.latLngToContainerPoint(a.latlng);
+    if (pt.x < -pad || pt.x > W + pad || pt.y < -pad || pt.y > H + pad) {
+      a.el.style.display = 'none';
+    } else {
+      a.el.style.display = '';
+      a.el.style.left = Math.round(pt.x) + 'px';
+      a.el.style.top  = Math.round(pt.y) + 'px';
+    }
+  }
+}
+
+// ══════════════════════════════════════════════
+// ROAD BUFFER MASK (no rendering — exclusion only)
+// ══════════════════════════════════════════════
+let roadSegs = [];
+let roadGrid = null;
+const GRID_M = 50;
+
+function highwayBufferM(tags) {
+  const h = tags.highway;
+  if (!h) return 4;
+  if (h === 'motorway' || h === 'trunk') return 9;
+  if (h === 'primary') return 7;
+  if (h === 'secondary' || h === 'tertiary') return 6;
+  if (h === 'residential' || h === 'unclassified') return 4.5;
+  if (h === 'service') return 3.5;
+  if (h === 'footway' || h === 'path' || h === 'cycleway' || h === 'pedestrian' || h === 'steps') return 2;
+  return 4;
+}
+
+function buildRoadIndex(roads, toM) {
+  roadSegs = [];
+  roadGrid = new Map();
+  for (const r of roads) {
+    const buf = r.buffer;
+    for (let i = 1; i < r.geometry.length; i++) {
+      const [x1,y1] = toM(r.geometry[i-1].lat, r.geometry[i-1].lon);
+      const [x2,y2] = toM(r.geometry[i].lat, r.geometry[i].lon);
+      const seg = { x1, y1, x2, y2, buffer: buf };
+      const idx = roadSegs.length;
+      roadSegs.push(seg);
+      const minX = Math.min(x1,x2) - buf, maxX = Math.max(x1,x2) + buf;
+      const minY = Math.min(y1,y2) - buf, maxY = Math.max(y1,y2) + buf;
+      const gMinX = Math.floor(minX / GRID_M), gMaxX = Math.floor(maxX / GRID_M);
+      const gMinY = Math.floor(minY / GRID_M), gMaxY = Math.floor(maxY / GRID_M);
+      for (let gx = gMinX; gx <= gMaxX; gx++) {
+        for (let gy = gMinY; gy <= gMaxY; gy++) {
+          const k = gx + ',' + gy;
+          let arr = roadGrid.get(k);
+          if (!arr) { arr = []; roadGrid.set(k, arr); }
+          arr.push(idx);
+        }
+      }
+    }
+  }
+}
+
+function distPointSeg2(px, py, seg) {
+  const dx = seg.x2 - seg.x1, dy = seg.y2 - seg.y1;
+  const len2 = dx*dx + dy*dy;
+  if (len2 === 0) {
+    const ex = px - seg.x1, ey = py - seg.y1;
+    return ex*ex + ey*ey;
+  }
+  let t = ((px - seg.x1) * dx + (py - seg.y1) * dy) / len2;
+  if (t < 0) t = 0; else if (t > 1) t = 1;
+  const cx = seg.x1 + t * dx, cy = seg.y1 + t * dy;
+  const ex = px - cx, ey = py - cy;
+  return ex*ex + ey*ey;
+}
+
+function inRoadBuffer(mx, my) {
+  if (!roadGrid) return false;
+  const gx = Math.floor(mx / GRID_M), gy = Math.floor(my / GRID_M);
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      const bucket = roadGrid.get((gx+dx) + ',' + (gy+dy));
+      if (!bucket) continue;
+      for (const i of bucket) {
+        const seg = roadSegs[i];
+        const buf = seg.buffer;
+        if (distPointSeg2(mx, my, seg) < buf*buf) return true;
+      }
+    }
+  }
+  return false;
+}
+
+// Returns true if (mx,my) is within maxDist metres of any road/path segment.
+// Used to keep synthetic anchors on publicly accessible land.
+function nearAnyRoad(mx, my, maxDist) {
+  if (!roadGrid) return false;
+  const d2 = maxDist * maxDist;
+  const cells = Math.ceil(maxDist / GRID_M) + 1;
+  const gx = Math.floor(mx / GRID_M), gy = Math.floor(my / GRID_M);
+  for (let dx = -cells; dx <= cells; dx++) {
+    for (let dy = -cells; dy <= cells; dy++) {
+      const bucket = roadGrid.get((gx+dx) + ',' + (gy+dy));
+      if (!bucket) continue;
+      for (const i of bucket) {
+        if (distPointSeg2(mx, my, roadSegs[i]) < d2) return true;
+      }
+    }
+  }
+  return false;
+}
+
+// Wider road exclusion used for synthetic anchor placement:
+// 3× the visual buffer (min 15m), searches ±2 grid cells to catch nearby freeways
+function inRoadBufferSynth(mx, my) {
+  if (!roadGrid) return false;
+  const gx = Math.floor(mx / GRID_M), gy = Math.floor(my / GRID_M);
+  for (let dx = -2; dx <= 2; dx++) {
+    for (let dy = -2; dy <= 2; dy++) {
+      const bucket = roadGrid.get((gx+dx) + ',' + (gy+dy));
+      if (!bucket) continue;
+      for (const i of bucket) {
+        const seg = roadSegs[i];
+        const buf = Math.max(seg.buffer * 3, 15);
+        if (distPointSeg2(mx, my, seg) < buf*buf) return true;
+      }
+    }
+  }
+  return false;
+}
+
+// Deterministic 0..1 from integer seed (for jitter + shuffle)
+function gridRand(seed) {
+  let s = (seed ^ 0xdeadbeef) | 0;
+  s = Math.imul(s ^ (s >>> 15), 0xd168aaad) | 0;
+  s = Math.imul(s ^ (s >>> 13), 0xaf723597) | 0;
+  return ((s ^ (s >>> 15)) >>> 0) / 0xFFFFFFFF;
+}
+
+// Point-in-polygon in meter-space
+function pointInPolyM(px, py, polyM) {
+  let inside = false;
+  for (let i = 0, j = polyM.length - 1; i < polyM.length; j = i++) {
+    const xi = polyM[i].x, yi = polyM[i].y;
+    const xj = polyM[j].x, yj = polyM[j].y;
+    const intersect = ((yi > py) !== (yj > py)) &&
+      (px < (xj - xi) * (py - yi) / (yj - yi + 1e-12) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+// ══════════════════════════════════════════════
+// OVERPASS QUERY + WORLD BUILD
+// ══════════════════════════════════════════════
+let fetching = false;
+
+// ══════════════════════════════════════════════
+// FOURIER BLOB GENERATOR (ported from pixel-test)
+// ══════════════════════════════════════════════
+
+// Seeded LCG random — deterministic across reloads
+function seededRand(seed) {
+  let s = seed | 0;
+  return () => {
+    s = Math.imul(s ^ (s >>> 15), 0xd168aaad) | 0;
+    s = Math.imul(s ^ (s >>> 13), 0xaf723597) | 0;
+    return ((s ^ (s >>> 15)) >>> 0) / 0xFFFFFFFF;
+  };
+}
+
+// Organic blob using Fourier harmonics — always convex outward bumps (cloud lobes).
+// spikeAmp: 0 = smooth ellipse, 1.0 = large dramatic lobes (still convex)
+function makeBlob(cx, cy, rx, ry, nVerts, seed, spikeAmp) {
+  if (spikeAmp === undefined) spikeAmp = 1.0;
+  const rand = seededRand(seed);
+  const comps = [];
+  for (let k = 1; k <= 5; k++) {
+    comps.push({ k, amp: rand() * spikeAmp / k, phase: rand() * Math.PI * 2 });
+  }
+  const pts = [];
+  for (let i = 0; i < nVerts; i++) {
+    const baseAngle = (i / nVerts) * Math.PI * 2;
+    const jitter    = (rand() - 0.5) * (Math.PI / nVerts * 0.8);
+    const t         = baseAngle + jitter;
+    let r = 1.0;
+    for (const c of comps) r += c.amp * Math.abs(Math.cos(c.k * t + c.phase));
+    pts.push({ x: cx + Math.cos(t) * rx * r, y: cy + Math.sin(t) * ry * r });
+  }
+  return pts;
+}
+
+// Blob group — main blob + 1–3 organic satellites at edge positions.
+// Returns array of { x, y } vertex arrays (meter-space).
+function makeBlobGroup(cx, cy, rx, ry, nVerts, seed) {
+  const rand = seededRand(seed);
+  const group = [];
+
+  // Main blob
+  group.push(makeBlob(cx, cy, rx, ry, nVerts, seed));
+
+  // No satellites — main blob only
+  const nSats = 0;
+  for (let i = 0; i < nSats; i++) {
+    const angle    = rand() * Math.PI * 2;
+    const edgeFrac = 0.65 + rand() * 0.25;
+    const ex       = cx + Math.cos(angle) * rx * edgeFrac;
+    const ey       = cy + Math.sin(angle) * ry * edgeFrac;
+    const sr       = 0.18 + rand() * 0.27;
+    const satRx    = rx * sr;
+    const satRy    = ry * sr * (0.6 + rand() * 0.8);
+    const satV     = 10 + Math.floor(rand() * 14);
+    const satSeed  = (seed ^ (i * 0x9e3779b9)) >>> 0;
+    group.push(makeBlob(ex, ey, satRx, satRy, satV, satSeed));
+  }
+  return group;
+}
+
+// ══════════════════════════════════════════════
+// FOREST PIXEL-CLUSTER RENDERER
+// ══════════════════════════════════════════════
+function ptInPolyScreen(px, py, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i][0], yi = poly[i][1];
+    const xj = poly[j][0], yj = poly[j][1];
+    if (((yi > py) !== (yj > py)) &&
+        px < (xj - xi) * (py - yi) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+function rasterizeForestPoly(screenPoly, px, band) {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const [x, y] of screenPoly) {
+    if (x < minX) minX = x;  if (x > maxX) maxX = x;
+    if (y < minY) minY = y;  if (y > maxY) maxY = y;
+  }
+  const W = forestCanvas.width, H = forestCanvas.height;
+  if (maxX < 0 || minX > W || maxY < 0 || minY > H) return;
+
+  const pad   = band + 1;
+  const cMinX = Math.floor(minX / px) - pad;
+  const cMinY = Math.floor(minY / px) - pad;
+  const cMaxX = Math.ceil (maxX / px) + pad;
+  const cMaxY = Math.ceil (maxY / px) + pad;
+  const cols  = cMaxX - cMinX;
+  const rows  = cMaxY - cMinY;
+
+  const grid = new Uint8Array(cols * rows);
+  for (let cj = 0; cj < rows; cj++) {
+    const sy = (cMinY + cj) * px + px * 0.5;
+    for (let ci = 0; ci < cols; ci++) {
+      const sx = (cMinX + ci) * px + px * 0.5;
+      if (ptInPolyScreen(sx, sy, screenPoly)) grid[cj * cols + ci] = 1;
+    }
+  }
+
+  const DIRS = [[1,0],[-1,0],[0,1],[0,-1]];
+  const half = band / 2;
+  for (let cj = 0; cj < rows; cj++) {
+    for (let ci = 0; ci < cols; ci++) {
+      if (!grid[cj * cols + ci]) continue;
+      let depth = band;
+      for (const [dci, dcj] of DIRS) {
+        for (let d = 1; d <= band; d++) {
+          const ni = ci + dci * d, nj = cj + dcj * d;
+          const out = ni < 0 || ni >= cols || nj < 0 || nj >= rows || !grid[nj * cols + ni];
+          if (out) { if (d < depth) depth = d; break; }
+        }
+        if (depth === 1) break;
+      }
+      const sx = (cMinX + ci) * px;
+      const sy = (cMinY + cj) * px;
+      if (depth >= band) {
+        forestCtx.fillStyle = FOREST_CORE;
+        forestCtx.fillRect(sx, sy, px, px);
+      } else {
+        const density = depth / band;
+        const bx = ((cMinX + ci) % 4 + 4) % 4;
+        const by = ((cMinY + cj) % 4 + 4) % 4;
+        if (FOREST_BAYER[by][bx] / 16 < density) {
+          forestCtx.fillStyle = depth <= half ? FOREST_EDGE : FOREST_MID;
+          forestCtx.fillRect(sx, sy, px, px);
+        }
+      }
+    }
+  }
+}
+
+// Render a road polygon onto the forest canvas OVER the already-drawn trees.
+// Interior cells → solid ground color. Edge cells → Bayer dither so the
+// transition is pixelated, letting tree pixels show through at the margins.
+function rasterizeRoadPoly(screenPoly, px, band) {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const [x, y] of screenPoly) {
+    if (x < minX) minX = x;  if (x > maxX) maxX = x;
+    if (y < minY) minY = y;  if (y > maxY) maxY = y;
+  }
+  const W = forestCanvas.width, H = forestCanvas.height;
+  if (maxX < 0 || minX > W || maxY < 0 || minY > H) return;
+
+  const pad   = band + 1;
+  const cMinX = Math.floor(minX / px) - pad;
+  const cMinY = Math.floor(minY / px) - pad;
+  const cMaxX = Math.ceil (maxX / px) + pad;
+  const cMaxY = Math.ceil (maxY / px) + pad;
+  const cols  = cMaxX - cMinX;
+  const rows  = cMaxY - cMinY;
+
+  const grid = new Uint8Array(cols * rows);
+  for (let cj = 0; cj < rows; cj++) {
+    const sy = (cMinY + cj) * px + px * 0.5;
+    for (let ci = 0; ci < cols; ci++) {
+      const sx = (cMinX + ci) * px + px * 0.5;
+      if (ptInPolyScreen(sx, sy, screenPoly)) grid[cj * cols + ci] = 1;
+    }
+  }
+
+  const DIRS = [[1,0],[-1,0],[0,1],[0,-1]];
+  for (let cj = 0; cj < rows; cj++) {
+    for (let ci = 0; ci < cols; ci++) {
+      if (!grid[cj * cols + ci]) continue;
+      let depth = band;
+      for (const [dci, dcj] of DIRS) {
+        for (let d = 1; d <= band; d++) {
+          const ni = ci + dci * d, nj = cj + dcj * d;
+          const out = ni < 0 || ni >= cols || nj < 0 || nj >= rows || !grid[nj * cols + ni];
+          if (out) { if (d < depth) depth = d; break; }
+        }
+        if (depth === 1) break;
+      }
+      const sx = (cMinX + ci) * px, sy = (cMinY + cj) * px;
+      if (depth >= band) {
+        forestCtx.fillStyle = '#415c30';   // solid ground
+        forestCtx.fillRect(sx, sy, px, px);
+      } else {
+        // Dither: higher density toward road center, sparse at edge.
+        // Unpainted cells keep the forest pixel already there → organic border.
+        const density = depth / band;
+        const bx = ((cMinX + ci) % 4 + 4) % 4;
+        const by = ((cMinY + cj) % 4 + 4) % 4;
+        if (FOREST_BAYER[by][bx] / 16 < density) {
+          forestCtx.fillStyle = '#415c30';
+          forestCtx.fillRect(sx, sy, px, px);
+        }
+      }
+    }
+  }
+}
+
+function renderForest() {
+  if (!forestCanvas || !map) return;
+  const W = window.innerWidth, H = window.innerHeight;
+  forestCanvas.width  = W;
+  forestCanvas.height = H;
+  forestCtx.clearRect(0, 0, W, H);
+
+  // Scale cell size with zoom so each cell covers a constant real-world footprint.
+  // At zoom 20 → FOREST_PIXEL px; each level down halves (same metres/cell).
+  const zoom  = map.getZoom();
+  const scale = Math.pow(2, zoom - 20);
+  const px    = Math.max(2, Math.round(FOREST_PIXEL * scale));
+  const band  = Math.max(2, Math.round(FOREST_BAND  * scale));
+
+  for (const blob of forestBlobs) {
+    const screenPoly = blob.map(([lat, lng]) => {
+      const pt = map.latLngToContainerPoint(L.latLng(lat, lng));
+      return [pt.x, pt.y];
+    });
+    rasterizeForestPoly(screenPoly, px, band);
+  }
+
+  // Roads rendered after trees — ground colour dithered over the forest pixels.
+  // The dither band lets tree pixels bleed into the road margin organically.
+  for (const poly of roadPolys) {
+    const screenPoly = poly.map(([lat, lng]) => {
+      const pt = map.latLngToContainerPoint(L.latLng(lat, lng));
+      return [pt.x, pt.y];
+    });
+    rasterizeRoadPoly(screenPoly, px, band);
+  }
+}
+
+// Greedy spacing filter — no two anchors within minDistM of each other, max maxCount total
+function spacedAnchors(candidates, minDistM, maxCount) {
+  const kept = [];
+  for (const c of candidates) {
+    if (kept.length >= maxCount) break;
+    const tooClose = kept.some(k => {
+      const dlat = (c.lat - k.lat) * 111320;
+      const dlng = (c.lng - k.lng) * 111320 * Math.cos(k.lat * Math.PI / 180);
+      return Math.hypot(dlat, dlng) < minDistM;
+    });
+    if (!tooClose) kept.push(c);
+  }
+  return kept;
+}
+
+async function fetchAnchors(lat, lng) {
+  if (fetching) return;
+  fetching = true;
+  lastQueryCenter = L.latLng(lat, lng);
+  updateStatus('Reading the forest…');
+
+  const r = QUERY_RADIUS;
+  const q = `[out:json][timeout:30];
+(
+  way["building"](around:${r},${lat},${lng});
+  way["highway"](around:${r},${lat},${lng});
+  way["natural"="water"](around:${r},${lat},${lng});
+  way["waterway"](around:${r},${lat},${lng});
+  way["leisure"~"^(park|garden|nature_reserve|recreation_ground|playground)$"](around:${r},${lat},${lng});
+  way["landuse"~"^(forest|cemetery)$"](around:${r},${lat},${lng});
+  way["natural"~"^(wood|scrub)$"](around:${r},${lat},${lng});
+  way["landuse"~"^(residential|farmland|farmyard|industrial|commercial|retail|allotments|military)$"](around:${r},${lat},${lng});
+  node["amenity"~"^(place_of_worship|school|pub|bar|cafe|library|community_centre)$"](around:${r},${lat},${lng});
+  node["historic"~"^(monument|memorial|ruins|castle|fort|cairn|archaeological_site|wayside_cross|wayside_shrine|boundary_stone)$"](around:${r},${lat},${lng});
+  node["tourism"~"^(viewpoint|attraction|artwork)$"](around:${r},${lat},${lng});
+  node["natural"~"^(peak|spring|cave_entrance|tree)$"]["name"](around:${r},${lat},${lng});
+);
+out geom;`;
+
+  try {
+    const res = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST',
+      body: 'data=' + encodeURIComponent(q),
+    });
+    const data = await res.json();
+
+    // Clear existing world (keep state, refresh polygons + DOM anchor elements)
+    forestBlobs = [];
+    roadPolys   = [];
+    waterLayer.clearLayers();
+    clearAnchorDOMs();
+    anchors = [];
+
+    // Meter-space conversion centered on query point
+    const M_PER_DEG_LAT = 111320;
+    const M_PER_DEG_LNG = 111320 * Math.cos(lat * Math.PI / 180);
+    const toM   = (la, ln) => [(ln - lng) * M_PER_DEG_LNG, (la - lat) * M_PER_DEG_LAT];
+    const fromM = (x, y)   => [lat + y / M_PER_DEG_LAT, lng + x / M_PER_DEG_LNG];
+
+    // Sort elements — handle both ways and nodes
+    const roads = [], waters = [], buildings = [], woods = [], privateLands = [], anchorCenters = [];
+    const PRIVATE_LANDUSE = new Set(['farmland','farmyard','industrial','commercial','retail','allotments','military']);
+    for (const el of data.elements) {
+      const tags = el.tags || {};
+
+      // ── NODE elements (amenity / historic / tourism / natural points) ──
+      if (el.type === 'node') {
+        if (el.lat != null && el.lon != null) {
+          anchorCenters.push({ id: el.id, lat: el.lat, lng: el.lon });
+        }
+        continue;
+      }
+
+      // ── WAY elements ──
+      if (el.type !== 'way' || !el.geometry || el.geometry.length < 2) continue;
+      if (tags.highway) {
+        roads.push({ id: el.id, geometry: el.geometry, buffer: highwayBufferM(tags) });
+      } else if (tags.natural === 'water' || tags.waterway) {
+        waters.push(el);
+      } else if (tags.building) {
+        buildings.push(el);
+      } else if (tags.natural === 'wood' || tags.landuse === 'forest' || tags.natural === 'scrub') {
+        woods.push(el);
+      } else if (tags.landuse && PRIVATE_LANDUSE.has(tags.landuse) && el.geometry.length >= 3) {
+        privateLands.push(el);
+      }
+      // Anchor centroids — parks + woods (natural quest landmarks)
+      if ((tags.leisure || tags.natural === 'wood' || tags.landuse === 'forest') &&
+          el.geometry.length >= 3) {
+        const cLat = el.geometry.reduce((s,p) => s + p.lat, 0) / el.geometry.length;
+        const cLng = el.geometry.reduce((s,p) => s + p.lon, 0) / el.geometry.length;
+        anchorCenters.push({ id: el.id, lat: cLat, lng: cLng });
+      }
+    }
+
+    // Build road exclusion mask
+    buildRoadIndex(roads, toM);
+
+    // Render water polygons — explicit pane so they draw above the forest canvas
+    for (const el of waters) {
+      if (el.geometry.length < 3) continue;
+      const pts = el.geometry.map(p => [p.lat, p.lon]);
+      L.polygon(pts, {
+        pane: 'waterPane',
+        color: '#a8b08a', weight: 4, fill: false,
+        interactive: false, smoothFactor: 1.5, opacity: 0.55,
+      }).addTo(waterLayer);
+      L.polygon(pts, {
+        pane: 'waterPane',
+        color: '#1a2840', weight: 1,
+        fillColor: '#2a3e5c', fillOpacity: 0.95,
+        interactive: false, smoothFactor: 1.5,
+      }).addTo(waterLayer);
+    }
+    const watersM = waters.map(p => p.geometry.map(g => {
+      const [x, y] = toM(g.lat, g.lon); return { x, y };
+    }));
+    const inAnyWater = (mx, my) => watersM.some(pm => pointInPolyM(mx, my, pm));
+
+    // Private land exclusion mask — synthetic anchors won't spawn here
+    const privateLandsM = privateLands.map(p => p.geometry.map(g => {
+      const [x, y] = toM(g.lat, g.lon); return { x, y };
+    }));
+    const inPrivateLand = (mx, my) => privateLandsM.some(pm => pointInPolyM(mx, my, pm));
+
+    // ── BUILD FOREST BLOBS — Fourier harmonic organic blobs per building + woods as-is.
+    // Each building gets a main blob + 1–3 satellite growths (cloud-lobe style).
+    const BLOB_NVERT = 160;   // vertex count — smooth cloud silhouette
+    const BLOB_SPIKE = 1.0;   // Fourier harmonic amplitude
+    const blobsM = [];
+    for (const b of buildings) {
+      const verts = b.geometry.map(p => { const [x,y] = toM(p.lat, p.lon); return {x,y}; });
+      let cx=0, cy=0;
+      for (const v of verts) { cx += v.x; cy += v.y; }
+      cx /= verts.length; cy /= verts.length;
+      let maxR = 0;
+      for (const v of verts) {
+        const d = Math.hypot(v.x - cx, v.y - cy);
+        if (d > maxR) maxR = d;
+      }
+      const dilate = 3 + Math.random() * 4;    // 3–7m of yard
+      const rx = (maxR + dilate) * 0.8;        // −20% overall
+      const ry = rx * (0.75 + Math.random() * 0.5);  // slight aspect ratio variation
+      const seed = Math.round(cx * 13) * 10007 + Math.round(cy * 13);
+      const group = makeBlobGroup(cx, cy, rx, ry, BLOB_NVERT, seed);
+      for (const blob of group) blobsM.push(blob);
+    }
+    for (const w of woods) {
+      if (w.geometry.length < 3) continue;
+      blobsM.push(w.geometry.map(p => { const [x,y] = toM(p.lat, p.lon); return {x,y}; }));
+    }
+    // Commercial / industrial landuse areas (business parks, warehouses).
+    // Use the same Fourier harmonic blob approach, sized to the area's actual footprint.
+    for (const el of privateLands) {
+      const lt = el.tags && el.tags.landuse;
+      if (lt !== 'commercial' && lt !== 'industrial' && lt !== 'retail') continue;
+      if (el.geometry.length < 3) continue;
+      const verts = el.geometry.map(p => { const [x,y] = toM(p.lat, p.lon); return {x,y}; });
+      let cx = 0, cy = 0;
+      for (const v of verts) { cx += v.x; cy += v.y; }
+      cx /= verts.length; cy /= verts.length;
+      // Bounding radius of the area's actual polygon
+      let maxR = 0;
+      for (const v of verts) {
+        const d = Math.hypot(v.x - cx, v.y - cy);
+        if (d > maxR) maxR = d;
+      }
+      const rx = (maxR + 6) * 0.8;   // −20% overall
+      const ry = rx * (0.8 + Math.random() * 0.4);
+      const seed = Math.round(cx * 7) * 9973 + Math.round(cy * 7);
+      const group = makeBlobGroup(cx, cy, rx, ry, BLOB_NVERT, seed);
+      for (const blob of group) blobsM.push(blob);
+    }
+
+    // Store blobs as lat/lng arrays for the pixel-cluster canvas renderer
+    forestBlobs = blobsM.map(blob => blob.map(p => fromM(p.x, p.y)));
+    renderForest();
+
+    // ── BUILD ROAD PATHS — rendered on the forest canvas with dithered edges.
+    // Two layers of width variation:
+    //   • Slow wobble — sinusoidal along the road length so it swells and narrows
+    //     over ~30m, preventing uniform corridor cuts through building blobs.
+    //   • Per-vertex jitter — high-frequency noise on each side independently
+    //     so left and right edges vary at different rates (feels hand-drawn).
+    const PATH_W_MULT = 1.3;    // base width = highway buffer × this
+    const WOBBLE_AMP  = 0.45;   // ±45% slow width wobble amplitude
+    const WOBBLE_FREQ = 0.12;   // radians per metre — ~52m cycle
+    const JITTER      = 0.30;   // ±30% high-freq per-vertex noise on top
+
+    for (const r of roads) {
+      if (r.geometry.length < 2) continue;
+      const baseW = r.buffer * PATH_W_MULT;
+      const left = [], right = [];
+
+      // Unique phase per road so wobble patterns don't all sync up
+      const roadPhaseL = Math.random() * Math.PI * 2;
+      const roadPhaseR = Math.random() * Math.PI * 2;
+      let distAlong = 0;  // cumulative distance along road in metres
+
+      for (let i = 0; i < r.geometry.length; i++) {
+        const p = r.geometry[i];
+        const [x, y] = toM(p.lat, p.lon);
+
+        // Accumulate distance along the road
+        if (i > 0) {
+          const [px, py] = toM(r.geometry[i-1].lat, r.geometry[i-1].lon);
+          distAlong += Math.hypot(x - px, y - py);
+        }
+
+        // Tangent — average of incoming and outgoing segments
+        let tx = 0, ty = 0;
+        if (i > 0) {
+          const [px, py] = toM(r.geometry[i-1].lat, r.geometry[i-1].lon);
+          tx += x - px; ty += y - py;
+        }
+        if (i < r.geometry.length - 1) {
+          const [nx, ny] = toM(r.geometry[i+1].lat, r.geometry[i+1].lon);
+          tx += nx - x; ty += ny - y;
+        }
+        const len = Math.hypot(tx, ty);
+        if (len < 1e-6) continue;
+        tx /= len; ty /= len;
+        const perpX = -ty, perpY = tx;
+
+        // Slow sinusoidal wobble — independent for left and right edge
+        const wobbleL = 1 + WOBBLE_AMP * Math.sin(distAlong * WOBBLE_FREQ + roadPhaseL);
+        const wobbleR = 1 + WOBBLE_AMP * Math.sin(distAlong * WOBBLE_FREQ + roadPhaseR);
+        // High-freq per-vertex jitter on top
+        const wL = baseW * wobbleL * (1 - JITTER + Math.random() * JITTER * 2);
+        const wR = baseW * wobbleR * (1 - JITTER + Math.random() * JITTER * 2);
+        left.push({ x: x + perpX * wL, y: y + perpY * wL });
+        right.push({ x: x - perpX * wR, y: y - perpY * wR });
+      }
+
+      if (left.length < 2) continue;
+      // Build the path polygon: down one side, back up the other
+      const pathM = [...left, ...right.reverse()];
+      const pts = pathM.map(p => fromM(p.x, p.y));
+      // Store as lat/lng array — rendered on the forest canvas with Bayer dither edges
+      roadPolys.push(pts);
+    }
+
+    // ── SYNTHETIC ANCHORS — sample directly along walkable road segments ──
+    // Every candidate is placed ON a road, so quests are always accessible on foot.
+    // Major roads (motorway/trunk/primary, buffer ≥ 7m) are excluded.
+    // Candidates are spaced ~60m apart along each road's centreline, with a
+    // deterministic stagger so adjacent roads don't all align at the same distance.
+    const ROAD_SAMPLE_M = 15;  // dense sampling — 15m apart so immediate zone has candidates
+    const synthCandidates = [];
+    for (const r of roads) {
+      if (r.buffer >= 7) continue;  // skip motorway / trunk / primary
+      // Stagger start position per road so samples don't all line up
+      const roadId = r.geometry[0].lat * 1e5 + r.geometry[0].lon * 1e3;
+      let nextSample = ROAD_SAMPLE_M * (0.2 + gridRand(roadId) * 0.6);
+      let cumDist = 0;
+      for (let i = 1; i < r.geometry.length; i++) {
+        const [x1, y1] = toM(r.geometry[i-1].lat, r.geometry[i-1].lon);
+        const [x2, y2] = toM(r.geometry[i].lat,   r.geometry[i].lon);
+        const segLen   = Math.hypot(x2 - x1, y2 - y1);
+        while (nextSample <= cumDist + segLen) {
+          const t  = (nextSample - cumDist) / segLen;
+          const sx = x1 + t * (x2 - x1);
+          const sy = y1 + t * (y2 - y1);
+          if (!inAnyWater(sx, sy) && !inPrivateLand(sx, sy)) {
+            const [sLat, sLng] = fromM(sx, sy);
+            const gid = `syn_${Math.round(sLat * 10000)}_${Math.round(sLng * 10000)}`;
+            synthCandidates.push({ id: gid, lat: sLat, lng: sLng });
+          }
+          nextSample += ROAD_SAMPLE_M;
+        }
+        cumDist += segLen;
+      }
+    }
+    // ── THREE ZONES ───────────────────────────────────────────────────────
+    // IMMEDIATE (0 – 100 m):  8–10 QPs, ≥15m apart  — right at your doorstep
+    // NEAR      (100 – 400 m): up to 5 QPs, ≥60m apart — walkable this session
+    // FAR       (400 – 1600 m): up to 10 QPs, ≥150m apart — goals to explore
+    const IMMED_M = 100, NEAR_M = 400;
+    const allCandidates = [...anchorCenters, ...synthCandidates];
+
+    const mLat = 111320, mLng = 111320 * Math.cos(lat * Math.PI / 180);
+    const distFromLoad = c => Math.hypot((c.lat - lat) * mLat, (c.lng - lng) * mLng);
+
+    const immedPool = allCandidates.filter(c => distFromLoad(c) <= IMMED_M);
+    const nearPool  = allCandidates.filter(c => { const d = distFromLoad(c); return d > IMMED_M && d <= NEAR_M; });
+    const farPool   = allCandidates.filter(c => distFromLoad(c) > NEAR_M);
+
+    const immedSpaced = spacedAnchors(immedPool, 15, 10);   // 8–10 quests, ≥15m apart
+    const nearSpaced  = spacedAnchors(nearPool,  60,  5);   // up to 5, ≥60m apart
+    const farSpaced   = spacedAnchors(farPool,  150, 10);   // up to 10, ≥150m apart
+    const spaced = [...immedSpaced, ...nearSpaced, ...farSpaced];
+
+    for (const c of spaced) addAnchor(c.id, c.lat, c.lng);
+    updateAnchorDOMPositions();
+
+    updateStatus(null, spaced.length);
+    if (spaced.length === 0) {
+      showToast('No quests in range — keep walking');
+    }
+  } catch(e) {
+    console.warn('Overpass error', e);
+    updateStatus('Offline — forest unseen');
+    showToast('Could not read Overpass — check connection');
+  }
+  fetching = false;
+}
+
+function maybeRefetch(lat, lng) {
+  if (!lastQueryCenter) { fetchAnchors(lat, lng); return; }
+  const dist = distMetres(L.latLng(lat, lng), lastQueryCenter);
+  if (dist > QUERY_RETRIGGER) fetchAnchors(lat, lng);
+}
+
+// ══════════════════════════════════════════════
+// STATUS BAR
+// ══════════════════════════════════════════════
+function updateStatus(msg, anchorCount) {
+  const txt = document.getElementById('sb-text');
+  const cnt = document.getElementById('sb-count');
+  if (msg) txt.textContent = msg;
+  else txt.textContent = 'Expedition active';
+  if (anchorCount !== undefined) {
+    const vis = anchors.filter(a => !a.visited).length;
+    cnt.textContent = vis + ' anchors active';
+  }
+}
+
+// ══════════════════════════════════════════════
+// PROXIMITY
+// ══════════════════════════════════════════════
+let popupOpen = false;
+
+// IDs of anchors the player walked away from this session.
+// They won't re-pop until the player physically leaves QUEST_RADIUS.
+const skippedAnchors = new Set();
+
+function checkProximity(lat, lng) {
+  if (popupOpen) return;
+  const pos = L.latLng(lat, lng);
+  let nearest = null, nearestDist = Infinity;
+
+  for (const a of anchors) {
+    if (a.visited) continue;
+    const d = distMetres(pos, a.latlng);
+
+    // Reset the skip-cooldown once the player walks out of range
+    if (skippedAnchors.has(a.id) && d > QUEST_RADIUS) {
+      skippedAnchors.delete(a.id);
+    }
+
+    // Visual state always reflects current distance
+    a.el.className = d <= QUEST_RADIUS ? 'anchor-dot nearby' : 'anchor-dot';
+
+    // Suppress popup retrigger until the player has left and returned
+    if (skippedAnchors.has(a.id)) continue;
+
+    if (d < nearestDist) { nearest = a; nearestDist = d; }
+  }
+
+  if (nearest && nearestDist <= QUEST_RADIUS) {
+    openQuestPopup(nearest, nearestDist);
+  }
+
+  // Update off-screen quest direction arrow
+  updateQuestDirector();
+}
+
+// ══════════════════════════════════════════════
+// QUEST DIRECTION ARROW
+// ══════════════════════════════════════════════
+let arrowElement = null;
+
+function updateQuestDirector() {
+  // Find nearest unvisited quest
+  let nearest = null, nearestDist = Infinity;
+  for (const a of anchors) {
+    if (a.visited) continue;
+    if (!playerPos) continue;
+    const d = distMetres(playerPos, a.latlng);
+    if (d < nearestDist) { nearest = a; nearestDist = d; }
+  }
+
+  if (!nearest || !playerPos) {
+    // No unvisited quests — remove arrow
+    if (arrowElement) {
+      arrowElement.remove();
+      arrowElement = null;
+    }
+    return;
+  }
+
+  // Check if quest is on-screen
+  const bounds = map.getBounds();
+  if (bounds.contains(nearest.latlng)) {
+    // Quest is visible — remove arrow
+    if (arrowElement) {
+      arrowElement.remove();
+      arrowElement = null;
+    }
+    return;
+  }
+
+  // Quest is off-screen — calculate angle and position on screen edge
+  const mapContainer = document.getElementById('map');
+  const playerPx = map.latLngToContainerPoint(playerPos);
+  const questPx = map.latLngToContainerPoint(nearest.latlng);
+
+  // Angle from player to quest
+  const dx = questPx.x - playerPx.x;
+  const dy = questPx.y - playerPx.y;
+  const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+
+  // Find edge position
+  const mapRect = mapContainer.getBoundingClientRect();
+  const edgePos = getScreenEdgePoint(dx, dy, { x: mapRect.width, y: mapRect.height });
+
+  // Create or update arrow
+  if (!arrowElement) {
+    arrowElement = document.createElement('div');
+    arrowElement.className = 'arrow-marker';
+    arrowElement.style.position = 'fixed';
+    arrowElement.style.zIndex = '999';
+    const svgArrow = `<svg viewBox="0 0 24 24" width="24" height="24" xmlns="http://www.w3.org/2000/svg"><polygon points="12,2 2,20 12,15 22,20" fill="#e8d080"/></svg>`;
+    arrowElement.innerHTML = svgArrow;
+    document.body.appendChild(arrowElement);
+  }
+
+  // Position arrow at edge with rotation
+  const arrowLeft = Math.round(edgePos.x);
+  const arrowTop = Math.round(edgePos.y);
+
+  arrowElement.style.left = arrowLeft + 'px';
+  arrowElement.style.top = arrowTop + 'px';
+  arrowElement.style.transform = `rotate(${angle + 90}deg)`;
+}
+
+function getScreenEdgePoint(dx, dy, mapSize) {
+  const center = { x: mapSize.x / 2, y: mapSize.y / 2 };
+  const margin = 20;
+
+  if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return center;
+
+  // Calculate how far we can go in each direction before hitting edge
+  const maxX = Math.abs(dx) > 0 ? (mapSize.x / 2 - margin) / Math.abs(dx) : Infinity;
+  const maxY = Math.abs(dy) > 0 ? (mapSize.y / 2 - margin) / Math.abs(dy) : Infinity;
+
+  // Use whichever direction hits the edge first
+  const ratio = Math.min(maxX, maxY);
+
+  const edgeX = center.x + dx * ratio;
+  const edgeY = center.y + dy * ratio;
+
+  return {
+    x: Math.max(margin, Math.min(mapSize.x - margin, edgeX)),
+    y: Math.max(margin, Math.min(mapSize.y - margin, edgeY))
+  };
+}
+
+// ══════════════════════════════════════════════
+// FOG OF WAR
+// ══════════════════════════════════════════════
+let fogCanvasLayer = null;
+
+function initFogLayer() {
+  if (fogCanvasLayer) return;
+
+  const FogCanvasLayer = L.Layer.extend({
+    onAdd: function(map) {
+      this._map = map;
+      this._canvas = L.DomUtil.create('canvas', 'fog-overlay');
+      this._canvas.style.position = 'fixed';
+      this._canvas.style.top = '0px';
+      this._canvas.style.left = '0px';
+      this._canvas.style.zIndex = '30'; // above map (0), below anchor dots (35) and UI (50+)
+      this._canvas.style.pointerEvents = 'none';
+      document.body.appendChild(this._canvas);
+
+      this._redraw = this._redraw.bind(this);
+      this._resizeCanvas = this._resizeCanvas.bind(this);
+      map.on('move zoom resize', this._redraw, this);
+      window.addEventListener('resize', this._resizeCanvas);
+      this._resizeCanvas();
+      this._redraw();
+    },
+    onRemove: function(map) {
+      if (this._canvas && this._canvas.parentNode) {
+        this._canvas.parentNode.removeChild(this._canvas);
+      }
+      map.off('move zoom resize', this._redraw, this);
+      window.removeEventListener('resize', this._resizeCanvas);
+    },
+    _hide: function() { if (this._canvas) this._canvas.style.display = 'none'; },
+    _show: function() { if (this._canvas) this._canvas.style.display = ''; },
+    _resizeCanvas: function() {
+      if (!this._canvas || !document.getElementById('map')) return;
+      const mapEl = document.getElementById('map');
+      const rect = mapEl.getBoundingClientRect();
+      this._canvas.width = window.innerWidth;
+      this._canvas.height = window.innerHeight;
+      this._redraw();
+    },
+    _redraw: function() {
+      if (!this._canvas || !this._map || !playerPos) return;
+
+      const canvas = this._canvas;
+      const ctx = canvas.getContext('2d');
+
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.95)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.globalCompositeOperation = 'destination-out';
+
+      // Calculate pixels-per-metre for the visibility radius
+      const refLat  = this._map.getCenter().lat;
+      const refLng  = this._map.getCenter().lng;
+      const M_DEG_LNG = 111320 * Math.cos(refLat * Math.PI / 180);
+      const testPt  = this._map.latLngToContainerPoint(L.latLng(refLat, refLng + 0.001));
+      const refPt   = this._map.latLngToContainerPoint(L.latLng(refLat, refLng));
+      const pixelsPerMetre = Math.hypot(testPt.x - refPt.x, testPt.y - refPt.y) / (0.001 * M_DEG_LNG);
+
+      // visitedPath stores raw {lat,lng} — convert directly, no reference-point arithmetic
+      const visitPoints = [playerPos];
+      for (const pt of visitedPath) {
+        visitPoints.push(L.latLng(pt.lat, pt.lng));
+      }
+
+      for (const pt of visitPoints) {
+        const containerPt = this._map.latLngToContainerPoint(pt);
+        const radiusPx = VISIT_RADIUS * pixelsPerMetre;
+        const featherRadius = radiusPx * 1.4; // Subtle feathering
+
+        // Create radial gradient for feathered edge
+        const gradient = ctx.createRadialGradient(containerPt.x, containerPt.y, 0, containerPt.x, containerPt.y, featherRadius);
+        gradient.addColorStop(0, 'rgba(0, 0, 0, 1)');        // Fully opaque at center
+        gradient.addColorStop(0.7, 'rgba(0, 0, 0, 0.9)');    // Subtle fade
+        gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');        // Fully transparent at edge
+
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(containerPt.x, containerPt.y, featherRadius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.globalCompositeOperation = 'source-over';
+    },
+  });
+
+  fogCanvasLayer = new FogCanvasLayer();
+  fogCanvasLayer.addTo(map);
+}
+
+function updateFogOfWar() {
+  if (!playerPos || !map) return;
+
+  if (!fogCanvasLayer) {
+    initFogLayer();
+  } else {
+    // Trigger redraw on existing layer
+    fogCanvasLayer._redraw();
+  }
+}
+
+// ══════════════════════════════════════════════
+// QUEST POPUP
+// ══════════════════════════════════════════════
+function openQuestPopup(anchor, dist) {
+  activeAnchor = anchor;
+  popupOpen = true;
+  document.getElementById('qp-title').textContent = anchor.enc.title;
+  document.getElementById('qp-flavor').textContent = anchor.enc.flavor;
+  document.getElementById('qp-distance').textContent = fmtDist(dist) + ' from your position';
+  document.getElementById('quest-popup').classList.add('open');
+}
+
+function closeQuestPopup() {
+  document.getElementById('quest-popup').classList.remove('open');
+  popupOpen = false;
+  activeAnchor = null;
+}
+
+document.getElementById('btn-investigate').addEventListener('click', () => {
+  if (!activeAnchor) return;
+  const a = activeAnchor;
+  a.visited = true;
+  state.completed[a.id] = true;
+  state.gold += 3;
+  saveState();
+  a.el.className = 'anchor-dot visited';
+  closeQuestPopup();
+  flashReward('+3 ◈ Gold');
+  updateHUD();
+  updateStatus(null, 0);
+});
+
+document.getElementById('btn-walkaway').addEventListener('click', () => {
+  if (activeAnchor) {
+    skippedAnchors.add(activeAnchor.id);
+    activeAnchor.el.className = 'anchor-dot';
+  }
+  closeQuestPopup();
+});
+
+// ══════════════════════════════════════════════
+// HUD
+// ══════════════════════════════════════════════
+function updateHUD() {
+  document.getElementById('hud-gold').textContent = state.gold;
+  document.getElementById('hud-quests').textContent = Object.keys(state.completed).length;
+}
+
+// ══════════════════════════════════════════════
+// GPS
+// ══════════════════════════════════════════════
+let gpsInit = false;
+let gpsHealthy = true;        // tracks signal state for one-shot "lost/restored" toasts
+
+// Stale-fog protection: if the saved path is more than this far from the
+// current first-fix, assume the player has moved to a new area and start fresh.
+const FOG_RESET_DIST_M = 1000;
+
+// Hardcoded fallback location used when geolocation is unavailable
+// (desktop testing / permission denied). Adjust as needed for development.
+const FALLBACK_LAT = 40.6322;
+const FALLBACK_LNG = -112.3249;
+
+function onPosition(pos) {
+  const { latitude: lat, longitude: lng } = pos.coords;
+  playerPos = L.latLng(lat, lng);
+
+  // Signal recovered — surface a one-shot toast so the player knows
+  if (gpsInit && !gpsHealthy) {
+    gpsHealthy = true;
+    showToast('Signal restored');
+  }
+
+  if (!gpsInit) {
+    gpsInit = true;
+    hideLoading();
+    initMap(lat, lng);
+    showUI();
+    fetchAnchors(lat, lng);
+
+    // Restore visited path — stored as {lat,lng} so the fog is never thrown
+    // off by map-pan reference drift. Reset if the saved path is from a
+    // different location (e.g. tested at home, now in a different city).
+    try {
+      const saved = localStorage.getItem('ambrogh_path');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length) {
+          const last = parsed[parsed.length - 1];
+          const distFromSaved = distMetres(playerPos, L.latLng(last.lat, last.lng));
+          if (distFromSaved < FOG_RESET_DIST_M) visitedPath = parsed;
+          // else: too far from saved fog, start fresh
+        }
+      }
+    } catch(_) {}
+    visitedPath.push({ lat, lng });
+    lastVisitPos = { lat, lng };
+  } else {
+    updatePlayerDotPos();
+    if (followMode) map.panTo(playerPos);
+    maybeRefetch(lat, lng);
+
+    // Track visited path — sample every VISIT_SAMPLE_DIST metres to reduce GPS noise.
+    if (lastVisitPos) {
+      const distWalked = distMetres(playerPos, L.latLng(lastVisitPos.lat, lastVisitPos.lng));
+      if (distWalked >= VISIT_SAMPLE_DIST) {
+        visitedPath.push({ lat, lng });
+        lastVisitPos = { lat, lng };
+        // Persist to localStorage (cap at 2000 points ≈ 30km of walking)
+        if (visitedPath.length > 2000) visitedPath.splice(0, visitedPath.length - 2000);
+        try { localStorage.setItem('ambrogh_path', JSON.stringify(visitedPath)); } catch(_) {}
+      }
+    }
+  }
+
+  checkProximity(lat, lng);
+  updateFogOfWar();
+}
+
+function onGPSError(err) {
+  console.warn('GPS error', err);
+  if (!gpsInit) {
+    // Fallback: open map at a default location so the UI still works
+    hideLoading();
+    showToast('Location unavailable — using fallback position', 4000);
+    playerPos = L.latLng(FALLBACK_LAT, FALLBACK_LNG);
+    gpsInit = true;
+    initMap(FALLBACK_LAT, FALLBACK_LNG);
+    showUI();
+    fetchAnchors(FALLBACK_LAT, FALLBACK_LNG);
+    return;
+  }
+  // Mid-session signal loss — surface a one-shot toast.
+  // watchPosition() will keep firing errors silently; we'll show "Signal restored"
+  // when onPosition next runs.
+  if (gpsHealthy) {
+    gpsHealthy = false;
+    showToast('Signal lost — finding you again', 4000);
+  }
+}
+
+function startGPS() {
+  if (!navigator.geolocation) { onGPSError({code:0}); return; }
+  navigator.geolocation.watchPosition(onPosition, onGPSError, {
+    enableHighAccuracy: true,
+    maximumAge: 2000,
+    timeout: 15000,
+  });
+}
+
+// ══════════════════════════════════════════════
+// UI TRANSITIONS
+// ══════════════════════════════════════════════
+function showLoading() {
+  document.getElementById('loading').classList.remove('hidden');
+}
+function hideLoading() {
+  document.getElementById('loading').classList.add('hidden');
+}
+function showUI() {
+  document.getElementById('hud').classList.remove('hidden');
+  document.getElementById('btn-center').classList.remove('hidden');
+  document.getElementById('top-left-bar').classList.add('visible');
+  document.getElementById('status-bar').classList.remove('hidden');
+}
+
+// ══════════════════════════════════════════════
+// VIEW MAP TOGGLE
+// ══════════════════════════════════════════════
+document.getElementById('btn-viewmap').addEventListener('click', () => {
+  if (!map || !playerPos) return;
+  const btn = document.getElementById('btn-viewmap');
+
+  const zoomControls = document.getElementById('map-zoom-controls');
+
+  if (!viewMapMode) {
+    // Enter overview mode
+    viewMapMode = true;
+    setFollowMode(false);
+    btn.textContent = '⊙ Close Map';
+    btn.classList.add('active');
+    zoomControls.classList.add('visible');
+    map.flyTo(playerPos, 15, { duration: 0.7 });
+  } else {
+    // Exit overview mode — return to player
+    viewMapMode = false;
+    setFollowMode(true);
+    btn.textContent = '⊙ View Map';
+    btn.classList.remove('active');
+    zoomControls.classList.remove('visible');
+    map.flyTo(playerPos, 20, { duration: 0.6 });
+  }
+});
+
+// ══════════════════════════════════════════════
+// BOOT
+// ══════════════════════════════════════════════
+loadState();
+updateHUD();
+
+// Reject first-fix readings worse than this — the world is built around the
+// initial position, so a fuzzy fix puts everything in the wrong place.
+const TITLE_ACCURACY_THRESHOLD_M = 50;
+
+document.getElementById('btn-getloc').addEventListener('click', () => {
+  const btn = document.getElementById('btn-getloc');
+  const status = document.getElementById('loc-status');
+  const beginBtn = document.getElementById('btn-begin');
+
+  if (!navigator.geolocation) {
+    btn.classList.add('error');
+    status.classList.add('error');
+    status.textContent = 'Geolocation not supported';
+    return;
+  }
+
+  btn.textContent = '◉ Locating…';
+  status.classList.remove('error', 'success');
+  status.textContent = 'Requesting permission…';
+
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      const { latitude, longitude, accuracy } = pos.coords;
+
+      // Soft-reject low-accuracy fixes — common indoors or with bad signal.
+      // The world is built around this position, so we want a clean reading.
+      if (accuracy > TITLE_ACCURACY_THRESHOLD_M) {
+        btn.textContent = '◉ Try Again';
+        btn.classList.remove('success');
+        btn.classList.add('error');
+        status.classList.remove('success');
+        status.classList.add('error');
+        status.innerHTML = `Signal weak (±${Math.round(accuracy)}m)<br><span style="font-size:8px;opacity:.8">Try moving outdoors and tap again</span>`;
+        beginBtn.disabled = true;
+        return;
+      }
+
+      btn.textContent = '◉ Location Found';
+      btn.classList.remove('error');
+      btn.classList.add('success');
+      status.classList.remove('error');
+      status.classList.add('success');
+      status.textContent = `±${Math.round(accuracy)}m · ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+      beginBtn.disabled = false;
+    },
+    (err) => {
+      btn.textContent = '◉ Try Again';
+      btn.classList.remove('success');
+      btn.classList.add('error');
+      status.classList.remove('success');
+      status.classList.add('error');
+      if (err.code === 1) {
+        // Permission denied — give actionable instructions
+        status.innerHTML = 'Permission denied<br><span style="font-size:8px;opacity:.8">Tap the 🔒 in address bar → Site settings → Allow location</span>';
+      } else if (err.code === 2) {
+        status.textContent = 'Position unavailable — try outdoors';
+      } else if (err.code === 3) {
+        status.textContent = 'Timed out — try again';
+      } else {
+        status.textContent = 'Location error';
+      }
+    },
+    { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+  );
+});
+
+document.getElementById('btn-zoom-in').addEventListener('click', () => { if (map) map.zoomIn(); });
+document.getElementById('btn-zoom-out').addEventListener('click', () => { if (map) map.zoomOut(); });
+
+let devFogHidden = false;
+document.getElementById('btn-dev').addEventListener('click', () => {
+  devFogHidden = !devFogHidden;
+  const btn = document.getElementById('btn-dev');
+  if (devFogHidden) {
+    if (fogCanvasLayer) fogCanvasLayer._hide();
+    btn.textContent = 'Dev ✕fog';
+    btn.classList.add('fog-off');
+  } else {
+    if (fogCanvasLayer) fogCanvasLayer._show();
+    btn.textContent = 'Dev';
+    btn.classList.remove('fog-off');
+  }
+});
+
+document.getElementById('btn-begin').addEventListener('click', () => {
+  if (document.getElementById('btn-begin').disabled) return;
+  document.getElementById('title-screen').classList.add('hidden');
+  showLoading();
+  startGPS();
+});
+</script>
+</body>
+</html>
