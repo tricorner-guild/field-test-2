@@ -453,9 +453,15 @@ let roadPolys  = [];          // lat/lng polygons for dithered road rendering (o
 //   Rim       (depth 1..BAND)              4-band Bayer dither in EDGE/MID/INNER/DEEP
 //   Core      (depth BAND..BAND+CC_BAND-1) 2-tone noise in CORE/CORE_LIGHT
 //   CC centre (depth >= BAND + CC_BAND)    3-tone noise in CC_LIGHT/CC_DARK/CC_DARK2
-const FOREST_PIXEL        = 8;        // cell size in screen px (at zoom 20)
-const FOREST_BAND         = 9;        // dither band depth in cells
+const FOREST_PIXEL        = 6;        // cell size in screen px (at zoom 20)
+const FOREST_BAND         = 10;       // dither band depth in cells
 const FOREST_CC_BAND      = 7;        // extra depth band for the CC centre
+// Ground forest BG (the "between blobs" texture, matches /road-test palette).
+// Slightly lighter than the tree blob palette so trees read as denser/darker
+// patches and roads (#415c30) read as bright lanes carving through.
+const FOREST_BG_CORE      = '#1a3010';
+const FOREST_BG_MID       = '#233d1e';
+const FOREST_BG_EDGE      = '#2e4a26';
 const FOREST_EDGE         = '#2d4623';
 const FOREST_MID          = '#28411e';
 const FOREST_INNER        = '#233c19';
@@ -981,13 +987,29 @@ function rasterizeRoadPoly(screenPoly, px, band) {
   }
 }
 
+// Ground-forest fill — Bayer-dithered 3-tone texture covering the whole
+// canvas, drawn before any blobs. Gives roads textured forest to carve
+// through (matches /road-test BG) and gives the world a continuous canopy
+// feel even where there are no building/woods polygons.
+function drawForestGround(W, H, px) {
+  for (let y = 0; y < H; y += px) {
+    const by = (((y / px) | 0) % 4 + 4) % 4;
+    for (let x = 0; x < W; x += px) {
+      const bx = (((x / px) | 0) % 4 + 4) % 4;
+      const v  = FOREST_BAYER[by][bx] / 16;
+      forestCtx.fillStyle =
+        v < 0.45 ? FOREST_BG_CORE :
+        v < 0.72 ? FOREST_BG_MID  : FOREST_BG_EDGE;
+      forestCtx.fillRect(x, y, px, px);
+    }
+  }
+}
+
 function renderForest() {
   if (!forestCanvas || !map) return;
   const W = window.innerWidth, H = window.innerHeight;
   forestCanvas.width  = W;
   forestCanvas.height = H;
-  forestCtx.clearRect(0, 0, W, H);
-
   // Scale cell size with zoom so each cell covers a constant real-world footprint.
   // At zoom 20 → FOREST_PIXEL px; each level down halves (same metres/cell).
   const zoom   = map.getZoom();
@@ -995,6 +1017,10 @@ function renderForest() {
   const px     = Math.max(2, Math.round(FOREST_PIXEL   * scale));
   const band   = Math.max(2, Math.round(FOREST_BAND    * scale));
   const ccBand = Math.max(1, Math.round(FOREST_CC_BAND * scale));
+
+  // Fill the whole canvas with the ground-forest texture first; trees and
+  // roads draw on top. Replaces the old clearRect — no transparent regions.
+  drawForestGround(W, H, px);
 
   for (const blob of forestBlobs) {
     const screenPoly = blob.map(([lat, lng]) => {
