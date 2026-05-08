@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>Tree Texture Test — AMBRÔUGH</title>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#1a3010;
+  --panel:rgba(6,14,3,.95);
+  --border:#2a5010;
+  --gold:#c8b060;
+  --text:#e8e4c0;
+  --text2:#b8cc90;
+  --green2:#4aaa30;
+}
+html,body{height:100%;overflow:hidden;background:var(--bg);font-family:'Courier New',monospace;color:var(--text)}
+canvas{display:block;position:fixed;inset:0}
+#controls{
+  position:fixed;top:14px;left:14px;z-index:10;
+  background:var(--panel);border:1px solid var(--border);
+  padding:14px 16px;border-radius:3px;
+  display:flex;flex-direction:column;gap:10px;
+  min-width:260px;user-select:none;
+  max-height:calc(100% - 28px);overflow-y:auto;
+}
+h3{color:var(--gold);letter-spacing:3px;font-size:11px;text-transform:uppercase;
+   border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:2px}
+.section{color:var(--text2);font-size:9px;letter-spacing:2px;text-transform:uppercase;
+         border-top:1px solid var(--border);padding-top:8px;margin-top:2px}
+.row{display:flex;align-items:center;gap:8px;font-size:11px;letter-spacing:1px;text-transform:uppercase}
+.row label{flex:1;color:var(--text2)}
+.row input[type=range]{flex:1.4;accent-color:var(--green2);cursor:pointer}
+.row .val{width:30px;text-align:right;color:var(--gold);font-size:11px}
+.row input[type=color]{width:30px;height:22px;border:1px solid var(--border);background:none;cursor:pointer;padding:1px;border-radius:2px}
+#perf{font-size:10px;letter-spacing:1px;color:var(--green2);text-transform:uppercase;border-top:1px solid var(--border);padding-top:8px}
+.save-row{display:flex;gap:8px;border-top:1px solid var(--border);padding-top:10px}
+.btn{flex:1;padding:7px 0;font-family:'Courier New',monospace;font-size:10px;letter-spacing:2px;text-transform:uppercase;cursor:pointer;border-radius:2px;border:1px solid var(--border)}
+.btn-save{background:var(--gold);color:#0a1a05;border-color:var(--gold)}
+.btn-save:active{opacity:0.75}
+.btn-reset{background:none;color:var(--text2);border-color:var(--border)}
+.btn-reset:active{opacity:0.5}
+#save-msg{font-size:10px;color:var(--gold);letter-spacing:1px;text-align:center;height:14px;text-transform:uppercase}
+.hint{font-size:10px;color:var(--text2);letter-spacing:0.5px;line-height:1.6;
+      text-transform:none;border-top:1px solid var(--border);padding-top:8px}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="controls">
+  <h3>Tree Texture Test</h3>
+
+  <div class="section">Renderer</div>
+  <div class="row">
+    <label>Pixel Size</label>
+    <input type="range" id="sl-px" min="2" max="18" value="6" step="1">
+    <span class="val" id="v-px">6</span>
+  </div>
+
+  <div class="section">CC Patch Mask</div>
+  <div class="row">
+    <label>Patch Scale</label>
+    <input type="range" id="sl-mscale" min="2" max="40" value="14" step="1">
+    <span class="val" id="v-mscale">14</span>
+  </div>
+  <div class="row">
+    <label>Patch Coverage</label>
+    <input type="range" id="sl-mthresh" min="0" max="100" value="35" step="1">
+    <span class="val" id="v-mthresh">35</span>
+  </div>
+
+  <div class="section">Core Zone</div>
+  <div class="row">
+    <label>Core Dark</label>
+    <input type="color" id="sl-core" value="#19320f">
+  </div>
+  <div class="row">
+    <label>Core Light</label>
+    <input type="color" id="sl-core2" value="#1e3714">
+  </div>
+  <div class="row">
+    <label>Core Texture</label>
+    <input type="range" id="sl-ctex" min="0" max="100" value="45" step="1">
+    <span class="val" id="v-ctex">45</span>
+  </div>
+  <div class="row">
+    <label>Core Scale</label>
+    <input type="range" id="sl-cscale" min="1" max="12" value="1" step="1">
+    <span class="val" id="v-cscale">1</span>
+  </div>
+
+  <div class="section">CC Patch</div>
+  <div class="row">
+    <label>CC Dark</label>
+    <input type="color" id="sl-cc1" value="#19320f">
+  </div>
+  <div class="row">
+    <label>CC Dark 2</label>
+    <input type="color" id="sl-cc1b" value="#0f2008">
+  </div>
+  <div class="row">
+    <label>CC Dark Tex</label>
+    <input type="range" id="sl-ccdtex" min="0" max="100" value="45" step="1">
+    <span class="val" id="v-ccdtex">45</span>
+  </div>
+  <div class="row">
+    <label>CC Light</label>
+    <input type="color" id="sl-cc2" value="#142d0a">
+  </div>
+  <div class="row">
+    <label>CC Texture</label>
+    <input type="range" id="sl-cctex" min="0" max="100" value="39" step="1">
+    <span class="val" id="v-cctex">39</span>
+  </div>
+  <div class="row">
+    <label>CC Scale</label>
+    <input type="range" id="sl-ccscale" min="1" max="12" value="2" step="1">
+    <span class="val" id="v-ccscale">2</span>
+  </div>
+
+  <div class="save-row">
+    <button class="btn btn-save" id="btn-save">⬤ Save</button>
+    <button class="btn btn-reset" id="btn-reset">Reset</button>
+  </div>
+  <div id="save-msg"></div>
+
+  <div id="perf">— ms · — cells</div>
+
+  <div class="hint">
+    Patch Mask carves out CC zones inside the Core base.<br>
+    Coverage 0 = pure Core · 100 = pure CC.<br>
+    Each zone has its own per-cell noise texture.
+  </div>
+</div>
+
+<script>
+'use strict';
+
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+
+let PIXEL_SIZE  = 6;
+
+let MASK_SCALE   = 14;     // low-frequency mask cell size (in render cells)
+let MASK_THRESH  = 0.35;   // cells whose mask noise > 1 - thresh are CC
+
+let FILL_CORE    = '#19320f';
+let FILL_CORE2   = '#1e3714';
+let CORE_TEX     = 0.45;
+let CORE_SCALE   = 1;
+
+let FILL_CC1     = '#19320f';
+let FILL_CC1b    = '#0f2008';
+let CC_DARK_TEX  = 0.45;
+let FILL_CC2     = '#142d0a';
+let CC_TEX       = 0.39;
+let CC_SCALE     = 2;
+
+// Two distinct hash-based per-cell noises so layers don't correlate.
+function hash2(ix, iy, salt) {
+  let h = Math.imul((ix * 1619) ^ (iy * 31337) ^ salt, 0x45d9f3b) | 0;
+  h = Math.imul(h ^ (h >>> 16), 0x45d9f3b) | 0;
+  h = Math.imul(h ^ (h >>> 16), 0x119de1f3) | 0;
+  return ((h ^ (h >>> 16)) >>> 0) / 0xFFFFFFFF;
+}
+
+// Smooth-ish low-frequency mask: bilinear interp of cell-corner hashes
+// at MASK_SCALE granularity, so CC patches are blobby rather than speckled.
+function maskAt(cx, cy) {
+  const fx = cx / MASK_SCALE;
+  const fy = cy / MASK_SCALE;
+  const ix = Math.floor(fx), iy = Math.floor(fy);
+  const tx = fx - ix,        ty = fy - iy;
+  // Smoothstep
+  const sx = tx * tx * (3 - 2 * tx);
+  const sy = ty * ty * (3 - 2 * ty);
+  const a = hash2(ix,     iy,     0xA1);
+  const b = hash2(ix + 1, iy,     0xA1);
+  const c = hash2(ix,     iy + 1, 0xA1);
+  const d = hash2(ix + 1, iy + 1, 0xA1);
+  const ab = a + (b - a) * sx;
+  const cd = c + (d - c) * sx;
+  return ab + (cd - ab) * sy;
+}
+
+function render() {
+  const t0 = performance.now();
+  const W  = canvas.width, H = canvas.height;
+  const px = PIXEL_SIZE;
+  const cols = Math.ceil(W / px);
+  const rows = Math.ceil(H / px);
+  let cells = 0;
+
+  for (let cj = 0; cj < rows; cj++) {
+    for (let ci = 0; ci < cols; ci++) {
+      const m = maskAt(ci, cj);
+      let fill;
+      if (m > 1 - MASK_THRESH) {
+        // CC patch — CC light spots + CC dark2 dapples + CC dark base
+        const n = hash2(Math.floor(ci / CC_SCALE), Math.floor(cj / CC_SCALE), 0xCC1);
+        if (n < CC_TEX) {
+          fill = FILL_CC2;
+        } else {
+          const n2 = hash2(ci, cj, 0xCC2);
+          fill = (n2 < CC_DARK_TEX) ? FILL_CC1b : FILL_CC1;
+        }
+      } else {
+        // Core base — Core light noise on Core dark
+        const n = hash2(Math.floor(ci / CORE_SCALE), Math.floor(cj / CORE_SCALE), 0xC07E);
+        fill = (n < CORE_TEX) ? FILL_CORE2 : FILL_CORE;
+      }
+      ctx.fillStyle = fill;
+      ctx.fillRect(ci * px, cj * px, px, px);
+      cells++;
+    }
+  }
+
+  const ms = (performance.now() - t0).toFixed(1);
+  document.getElementById('perf').textContent = `${ms} ms · ${cells.toLocaleString()} cells`;
+}
+
+function bind(id, valId, fn) {
+  const el = document.getElementById(id);
+  const vl = valId ? document.getElementById(valId) : null;
+  el.addEventListener('input', function() {
+    if (vl) vl.textContent = this.value;
+    fn(+this.value);
+  });
+}
+
+bind('sl-px',     'v-px',     v => { PIXEL_SIZE  = v; render(); });
+bind('sl-mscale', 'v-mscale', v => { MASK_SCALE  = v; render(); });
+bind('sl-mthresh','v-mthresh',v => { MASK_THRESH = v / 100; render(); });
+bind('sl-ctex',   'v-ctex',   v => { CORE_TEX    = v / 100; render(); });
+bind('sl-cscale', 'v-cscale', v => { CORE_SCALE  = v;       render(); });
+bind('sl-ccdtex', 'v-ccdtex', v => { CC_DARK_TEX = v / 100; render(); });
+bind('sl-cctex',  'v-cctex',  v => { CC_TEX      = v / 100; render(); });
+bind('sl-ccscale','v-ccscale',v => { CC_SCALE    = v;       render(); });
+
+document.getElementById('sl-core' ).addEventListener('input', function() { FILL_CORE  = this.value; render(); });
+document.getElementById('sl-core2').addEventListener('input', function() { FILL_CORE2 = this.value; render(); });
+document.getElementById('sl-cc1'  ).addEventListener('input', function() { FILL_CC1   = this.value; render(); });
+document.getElementById('sl-cc1b' ).addEventListener('input', function() { FILL_CC1b  = this.value; render(); });
+document.getElementById('sl-cc2'  ).addEventListener('input', function() { FILL_CC2   = this.value; render(); });
+
+const STORAGE_KEY = 'ambrogh_tree_texture_settings';
+
+const DEFAULTS = {
+  'sl-px':6,'sl-mscale':14,'sl-mthresh':35,
+  'sl-core':'#19320f','sl-core2':'#1e3714','sl-ctex':45,'sl-cscale':1,
+  'sl-cc1':'#19320f','sl-cc1b':'#0f2008','sl-ccdtex':45,
+  'sl-cc2':'#142d0a','sl-cctex':39,'sl-ccscale':2
+};
+
+function collectSettings() {
+  const s = {};
+  for (const id of Object.keys(DEFAULTS)) {
+    const el = document.getElementById(id);
+    if (el) s[id] = el.value;
+  }
+  return s;
+}
+
+function applySettings(s) {
+  for (const [id, val] of Object.entries(s)) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    el.value = val;
+    el.dispatchEvent(new Event('input'));
+  }
+}
+
+document.getElementById('btn-save').addEventListener('click', () => {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(collectSettings()));
+  const msg = document.getElementById('save-msg');
+  msg.textContent = '✓ saved';
+  setTimeout(() => msg.textContent = '', 2000);
+});
+
+document.getElementById('btn-reset').addEventListener('click', () => {
+  localStorage.removeItem(STORAGE_KEY);
+  applySettings(DEFAULTS);
+  const msg = document.getElementById('save-msg');
+  msg.textContent = 'reset to defaults';
+  setTimeout(() => msg.textContent = '', 2000);
+});
+
+const saved = localStorage.getItem(STORAGE_KEY);
+if (saved) {
+  try { applySettings(JSON.parse(saved)); } catch(e) {}
+}
+
+window.addEventListener('resize', () => {
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+  render();
+});
+
+canvas.width  = window.innerWidth;
+canvas.height = window.innerHeight;
+render();
+</script>
+</body>
+</html>
