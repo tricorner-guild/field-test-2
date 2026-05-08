@@ -940,13 +940,16 @@ function renderForest() {
   }
 }
 
-// Ring-spiral selector: divides the area into concentric rings of width opts.ringWidth and
-// picks N from each, spread across 8 compass sectors. opts.anchorsPerRing is either a
-// single number (uniform across all rings up to opts.maxRange) or an array — the schedule —
-// where index 0 is the innermost ring. Use the schedule form for front-loaded distribution
-// (e.g. [3, 2, 2, 1, 1, 1, 1, 1]: easy starter cluster, then tapering reward-for-effort).
-// Per-road cap is global; if a ring can't fill while respecting it, the cap is lifted just
-// for that ring so anchor count stays healthy in low-road-diversity areas.
+// Two-phase spaced anchor selection.
+//   Phase 1 — coverage: one closest valid candidate per compass sector, so
+//   the player has a quest in every direction even when the urban area is
+//   one-sided (e.g. on the edge of a city, with empty wedges far out).
+//   Phase 2 — density: fill the remaining schedule budget with closest-first
+//   ring-spiral, walking inner rings outward to honour the schedule shape
+//   (e.g. [3,2,2,1,1,1,1,1]: front-loaded starter cluster, tapering reward).
+// opts.anchorsPerRing's sum is the total budget. Per-road cap applies in
+// both phases; if it would block the last few picks it's lifted as a final
+// mop-up so anchor count stays healthy in low-road-diversity areas.
 function spacedAnchors(candidates, originLat, originLng, opts) {
   if (!candidates.length) return [];
   const RING_WIDTH = opts.ringWidth;
@@ -958,87 +961,83 @@ function spacedAnchors(candidates, originLat, originLng, opts) {
   const MIN_DIST = opts.minDistM;
   const MAX_PER_ROAD = opts.maxPerRoad;
   const SECTORS = 8;
+  const TOTAL_QUOTA = SCHEDULE.reduce((a, b) => a + b, 0);
 
   const mLat = 111320;
   const mLng = 111320 * Math.cos(originLat * Math.PI / 180);
   const distM = (a, b) => Math.hypot((a.lat - b.lat) * mLat, (a.lng - b.lng) * mLng);
   const distFromOrigin = c => Math.hypot((c.lat - originLat) * mLat, (c.lng - originLng) * mLng);
-
-  const ringBins = Array.from({ length: numRings }, () => []);
-  for (const c of candidates) {
-    const d = distFromOrigin(c);
-    if (d > MAX_RANGE) continue;
-    const idx = Math.min(numRings - 1, Math.floor(d / RING_WIDTH));
-    ringBins[idx].push(c);
-  }
-
-  // DIAGNOSTIC: count candidates by global sector for debug overlay
-  const globalSectorCounts = new Array(SECTORS).fill(0);
-  for (const c of candidates) {
-    if (distFromOrigin(c) > MAX_RANGE) continue;
+  const sectorOf = c => {
     const dlat = (c.lat - originLat) * mLat;
     const dlng = (c.lng - originLng) * mLng;
     let ang = Math.atan2(dlng, dlat);
     if (ang < 0) ang += 2 * Math.PI;
-    const idx = Math.min(SECTORS - 1, Math.floor(ang / (2 * Math.PI) * SECTORS));
-    globalSectorCounts[idx]++;
+    return Math.min(SECTORS - 1, Math.floor(ang / (2 * Math.PI) * SECTORS));
+  };
+  const ringOf = c => Math.min(numRings - 1, Math.floor(distFromOrigin(c) / RING_WIDTH));
+
+  // Bin candidates by compass sector, sorted closest-first within each
+  const sectorPools = Array.from({ length: SECTORS }, () => []);
+  for (const c of candidates) {
+    if (distFromOrigin(c) > MAX_RANGE) continue;
+    sectorPools[sectorOf(c)].push(c);
   }
-  window.__debugSectorCounts = globalSectorCounts;
+  for (const pool of sectorPools) pool.sort((a, b) => distFromOrigin(a) - distFromOrigin(b));
+
+  // DIAGNOSTIC: per-sector candidate totals for the status bar
+  window.__debugSectorCounts = sectorPools.map(p => p.length);
 
   const kept = [];
+  const pickedIds = new Set();
   const roadCounts = new Map();
   const tooCloseToKept = c => kept.some(k => distM(c, k) < MIN_DIST);
+  const tryPick = (c, allowRoadCapBypass) => {
+    if (pickedIds.has(c.id)) return false;
+    if (tooCloseToKept(c)) return false;
+    if (!allowRoadCapBypass && MAX_PER_ROAD && c.roadId != null
+        && (roadCounts.get(c.roadId) || 0) >= MAX_PER_ROAD) return false;
+    kept.push(c);
+    pickedIds.add(c.id);
+    if (c.roadId != null) roadCounts.set(c.roadId, (roadCounts.get(c.roadId) || 0) + 1);
+    return true;
+  };
 
-  for (let r = 0; r < numRings; r++) {
-    const ringQuota = SCHEDULE[r];
-    if (!ringQuota || !ringBins[r].length) continue;
-
-    // Sub-bin this ring into 8 angular sectors, sorted closest-first
-    const sectorBins = Array.from({ length: SECTORS }, () => []);
-    for (const c of ringBins[r]) {
-      const dlat = (c.lat - originLat) * mLat;
-      const dlng = (c.lng - originLng) * mLng;
-      let ang = Math.atan2(dlng, dlat);
-      if (ang < 0) ang += 2 * Math.PI;
-      const idx = Math.min(SECTORS - 1, Math.floor(ang / (2 * Math.PI) * SECTORS));
-      sectorBins[idx].push(c);
+  // Phase 1 — coverage: one closest valid candidate per non-empty sector
+  for (let s = 0; s < SECTORS; s++) {
+    for (const c of sectorPools[s]) {
+      if (tryPick(c)) break;
     }
-    for (const bin of sectorBins) bin.sort((a, b) => distFromOrigin(a) - distFromOrigin(b));
+  }
 
-    // Pass 1: round-robin sectors with per-road cap.
-    // Rotate the starting sector by ring index so quotas < 8 don't always
-    // pick the same compass points — over 8 rings every sector starts once.
-    const startOffset = r % SECTORS;
-    let ringPicks = 0;
-    let progressed = true;
-    while (progressed && ringPicks < ringQuota) {
-      progressed = false;
-      for (let i = 0; i < SECTORS && ringPicks < ringQuota; i++) {
-        const s = (i + startOffset) % SECTORS;
-        const bin = sectorBins[s];
-        while (bin.length > 0) {
-          const c = bin.shift();
-          if (tooCloseToKept(c)) continue;
-          if (MAX_PER_ROAD && c.roadId != null && (roadCounts.get(c.roadId) || 0) >= MAX_PER_ROAD) continue;
-          kept.push(c);
-          if (c.roadId != null) roadCounts.set(c.roadId, (roadCounts.get(c.roadId) || 0) + 1);
-          ringPicks++;
-          progressed = true;
-          break;
-        }
+  // Phase 2 — density: fill remaining budget ring-by-ring honouring the
+  // per-ring schedule shape (after subtracting what Phase 1 already placed)
+  if (kept.length < TOTAL_QUOTA) {
+    const phase1ByRing = new Array(numRings).fill(0);
+    for (const k of kept) phase1ByRing[ringOf(k)]++;
+
+    for (let r = 0; r < numRings && kept.length < TOTAL_QUOTA; r++) {
+      let remaining = SCHEDULE[r] - phase1ByRing[r];
+      if (remaining <= 0) continue;
+      const ringPool = candidates
+        .filter(c => !pickedIds.has(c.id) && distFromOrigin(c) <= MAX_RANGE && ringOf(c) === r)
+        .sort((a, b) => distFromOrigin(a) - distFromOrigin(b));
+      for (const c of ringPool) {
+        if (remaining <= 0 || kept.length >= TOTAL_QUOTA) break;
+        if (tryPick(c)) remaining--;
       }
     }
+  }
 
-    // Pass 2: if ring underfilled, top up without per-road cap
-    if (ringPicks < ringQuota) {
-      const leftovers = sectorBins.flat().sort((a, b) => distFromOrigin(a) - distFromOrigin(b));
-      for (const c of leftovers) {
-        if (ringPicks >= ringQuota) break;
-        if (tooCloseToKept(c)) continue;
-        kept.push(c);
-        if (c.roadId != null) roadCounts.set(c.roadId, (roadCounts.get(c.roadId) || 0) + 1);
-        ringPicks++;
-      }
+  // Mop-up: if the schedule shape couldn't be filled (e.g. a quota ring is
+  // empty), fill remaining slots with closest leftover anywhere in range,
+  // bypassing the per-road cap so anchor count stays at TOTAL_QUOTA.
+  if (kept.length < TOTAL_QUOTA) {
+    const leftovers = candidates
+      .filter(c => !pickedIds.has(c.id) && distFromOrigin(c) <= MAX_RANGE)
+      .sort((a, b) => distFromOrigin(a) - distFromOrigin(b));
+    for (const c of leftovers) {
+      if (kept.length >= TOTAL_QUOTA) break;
+      tryPick(c, true);
     }
   }
 
