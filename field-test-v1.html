@@ -988,6 +988,10 @@ function spacedAnchors(candidates, originLat, originLng, opts) {
   const MAX_RANGE = numRings * RING_WIDTH;
   const MIN_DIST = opts.minDistM;
   const MAX_PER_ROAD = opts.maxPerRoad;
+  // Phase 1 minimum distance: pushes directional-coverage anchors out to a
+  // "horizon" so they don't all bunch right next to the player. Phase 2 then
+  // handles inner-ring density via the schedule.
+  const COVERAGE_MIN_DIST = opts.coverageMinDistM || 0;
   const SECTORS = 8;
   const TOTAL_QUOTA = SCHEDULE.reduce((a, b) => a + b, 0);
 
@@ -1030,8 +1034,17 @@ function spacedAnchors(candidates, originLat, originLng, opts) {
     return true;
   };
 
-  // Phase 1 — coverage: one closest valid candidate per non-empty sector
+  // Phase 1 — coverage: closest valid candidate at the horizon distance per
+  // sector. If no candidate in a sector reaches the horizon, fall back to the
+  // closest available so coverage isn't lost in directions where the urban
+  // area doesn't extend that far.
   for (let s = 0; s < SECTORS; s++) {
+    let placed = false;
+    for (const c of sectorPools[s]) {
+      if (distFromOrigin(c) < COVERAGE_MIN_DIST) continue;
+      if (tryPick(c)) { placed = true; break; }
+    }
+    if (placed || COVERAGE_MIN_DIST === 0) continue;
     for (const c of sectorPools[s]) {
       if (tryPick(c)) break;
     }
@@ -1342,6 +1355,7 @@ out geom;`;
       anchorsPerRing: [3, 2, 2, 1, 1, 1, 1, 1],
       minDistM: 60,
       maxPerRoad: 2,
+      coverageMinDistM: 400,
     });
 
     for (const c of spaced) addAnchor(c.id, c.lat, c.lng);
