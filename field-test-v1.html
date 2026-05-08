@@ -940,18 +940,38 @@ function renderForest() {
   }
 }
 
-// Greedy spacing filter — no two anchors within minDistM of each other, max maxCount total
-function spacedAnchors(candidates, minDistM, maxCount) {
+// Greedy spacing filter — no two anchors within minDistM of each other, max maxCount total.
+// Optional maxPerRoad caps how many anchors can come from the same source road; a two-pass
+// fallback then fills remaining slots without the cap so anchor count stays healthy when
+// few roads are available. Candidates without a roadId (e.g. POIs) are exempt from the cap.
+function spacedAnchors(candidates, minDistM, maxCount, maxPerRoad) {
   const kept = [];
-  for (const c of candidates) {
-    if (kept.length >= maxCount) break;
-    const tooClose = kept.some(k => {
-      const dlat = (c.lat - k.lat) * 111320;
-      const dlng = (c.lng - k.lng) * 111320 * Math.cos(k.lat * Math.PI / 180);
-      return Math.hypot(dlat, dlng) < minDistM;
-    });
-    if (!tooClose) kept.push(c);
+  const tooCloseToKept = c => kept.some(k => {
+    const dlat = (c.lat - k.lat) * 111320;
+    const dlng = (c.lng - k.lng) * 111320 * Math.cos(k.lat * Math.PI / 180);
+    return Math.hypot(dlat, dlng) < minDistM;
+  });
+
+  if (maxPerRoad) {
+    const roadCounts = new Map();
+    for (const c of candidates) {
+      if (kept.length >= maxCount) break;
+      if (c.roadId != null && (roadCounts.get(c.roadId) || 0) >= maxPerRoad) continue;
+      if (tooCloseToKept(c)) continue;
+      kept.push(c);
+      if (c.roadId != null) roadCounts.set(c.roadId, (roadCounts.get(c.roadId) || 0) + 1);
+    }
   }
+
+  if (kept.length < maxCount) {
+    for (const c of candidates) {
+      if (kept.length >= maxCount) break;
+      if (kept.includes(c)) continue;
+      if (tooCloseToKept(c)) continue;
+      kept.push(c);
+    }
+  }
+
   return kept;
 }
 
@@ -1206,7 +1226,7 @@ out geom;`;
           if (!inAnyWater(sx, sy) && !inPrivateLand(sx, sy)) {
             const [sLat, sLng] = fromM(sx, sy);
             const gid = `syn_${Math.round(sLat * 10000)}_${Math.round(sLng * 10000)}`;
-            synthCandidates.push({ id: gid, lat: sLat, lng: sLng });
+            synthCandidates.push({ id: gid, lat: sLat, lng: sLng, roadId });
           }
           nextSample += ROAD_SAMPLE_M;
         }
@@ -1227,9 +1247,9 @@ out geom;`;
     const nearPool  = allCandidates.filter(c => { const d = distFromLoad(c); return d > IMMED_M && d <= NEAR_M; });
     const farPool   = allCandidates.filter(c => distFromLoad(c) > NEAR_M);
 
-    const immedSpaced = spacedAnchors(immedPool, 15, 10);   // 8–10 quests, ≥15m apart
-    const nearSpaced  = spacedAnchors(nearPool,  60,  5);   // up to 5, ≥60m apart
-    const farSpaced   = spacedAnchors(farPool,  150, 10);   // up to 10, ≥150m apart
+    const immedSpaced = spacedAnchors(immedPool, 15, 10, 2);   // 8–10 quests, ≥15m apart, ≤2 per road
+    const nearSpaced  = spacedAnchors(nearPool,  60,  5, 2);   // up to 5, ≥60m apart, ≤2 per road
+    const farSpaced   = spacedAnchors(farPool,  150, 10, 3);   // up to 10, ≥150m apart, ≤3 per road
     const spaced = [...immedSpaced, ...nearSpaced, ...farSpaced];
 
     for (const c of spaced) addAnchor(c.id, c.lat, c.lng);
