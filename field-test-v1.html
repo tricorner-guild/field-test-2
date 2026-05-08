@@ -454,22 +454,19 @@ let roadPolys  = [];          // lat/lng polygons for dithered road rendering (o
 //   Core      (depth BAND..BAND+CC_BAND-1) 2-tone noise in CORE/CORE_LIGHT
 //   CC centre (depth >= BAND + CC_BAND)    3-tone noise in CC_LIGHT/CC_DARK/CC_DARK2
 const FOREST_PIXEL        = 8;        // cell size in screen px (at zoom 20)
-const FOREST_BAND         = 9;        // dither band depth in cells
-const FOREST_CC_BAND      = 7;        // extra depth band for the CC centre
+const FOREST_BAND         = 9;        // tree dither band depth in cells
+const ROAD_BAND           = 6;        // road dither band — narrower so typical
+                                       // residential roads (~14 cells wide) get
+                                       // a solid lit centre plus a visible dither
+                                       // shoulder, instead of high-density-everywhere.
 const FOREST_EDGE         = '#2d4623';
 const FOREST_MID          = '#28411e';
 const FOREST_INNER        = '#233c19';
 const FOREST_DEEP         = '#1e3714';
 const FOREST_CORE         = '#19320f';
 const FOREST_CORE_LIGHT   = '#1e3714';
-const FOREST_CC_DARK      = '#19320f';
-const FOREST_CC_DARK2     = '#0f2008';
-const FOREST_CC_LIGHT     = '#142d0a';
 const FOREST_CORE_TEX     = 0.45;     // CORE_LIGHT noise probability
 const FOREST_CORE_SCALE   = 1;        // core noise cell grouping
-const FOREST_CC_DARK_TEX  = 0.45;     // CC_DARK2 noise probability inside CC dark zone
-const FOREST_CC_TEX       = 0.39;     // CC_LIGHT noise probability inside CC zone
-const FOREST_CC_SCALE     = 2;        // CC noise cell grouping
 const FOREST_BAYER = [
   [ 0,  8,  2, 10],
   [12,  4, 14,  6],
@@ -843,7 +840,7 @@ function ptInPolyScreen(px, py, poly) {
   return inside;
 }
 
-function rasterizeForestPoly(screenPoly, px, band, ccBand) {
+function rasterizeForestPoly(screenPoly, px, band) {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const [x, y] of screenPoly) {
     if (x < minX) minX = x;  if (x > maxX) maxX = x;
@@ -852,7 +849,7 @@ function rasterizeForestPoly(screenPoly, px, band, ccBand) {
   const W = forestCanvas.width, H = forestCanvas.height;
   if (maxX < 0 || minX > W || maxY < 0 || minY > H) return;
 
-  const maxD  = band + ccBand;
+  const maxD  = band;
   const pad   = maxD + 1;
   const cMinX = Math.floor(minX / px) - pad;
   const cMinY = Math.floor(minY / px) - pad;
@@ -888,17 +885,7 @@ function rasterizeForestPoly(screenPoly, px, band, ccBand) {
       }
       const sx = (cMinX + ci) * px;
       const sy = (cMinY + cj) * px;
-      if (depth >= maxD) {
-        // CC centre: 3-tone noise (light spots, dark2 spots, dark base)
-        const n = cellNoise((cMinX + ci) / FOREST_CC_SCALE, (cMinY + cj) / FOREST_CC_SCALE);
-        if (n < FOREST_CC_TEX) {
-          forestCtx.fillStyle = FOREST_CC_LIGHT;
-        } else {
-          const n2 = cellNoise((cMinX + ci) * 1.7 + 31, (cMinY + cj) * 1.7 + 17);
-          forestCtx.fillStyle = (n2 < FOREST_CC_DARK_TEX) ? FOREST_CC_DARK2 : FOREST_CC_DARK;
-        }
-        forestCtx.fillRect(sx, sy, px, px);
-      } else if (depth >= band) {
+      if (depth >= band) {
         // Core: 2-tone noise (CORE base, CORE_LIGHT highlights)
         const n = cellNoise(cMinX + ci, cMinY + cj);
         forestCtx.fillStyle = (n < FOREST_CORE_TEX) ? FOREST_CORE_LIGHT : FOREST_CORE;
@@ -990,28 +977,29 @@ function renderForest() {
 
   // Scale cell size with zoom so each cell covers a constant real-world footprint.
   // At zoom 20 → FOREST_PIXEL px; each level down halves (same metres/cell).
-  const zoom   = map.getZoom();
-  const scale  = Math.pow(2, zoom - 20);
-  const px     = Math.max(2, Math.round(FOREST_PIXEL   * scale));
-  const band   = Math.max(2, Math.round(FOREST_BAND    * scale));
-  const ccBand = Math.max(1, Math.round(FOREST_CC_BAND * scale));
+  const zoom    = map.getZoom();
+  const scale   = Math.pow(2, zoom - 20);
+  const px      = Math.max(2, Math.round(FOREST_PIXEL * scale));
+  const band    = Math.max(2, Math.round(FOREST_BAND  * scale));
+  const rdBand  = Math.max(2, Math.round(ROAD_BAND    * scale));
 
   for (const blob of forestBlobs) {
     const screenPoly = blob.map(([lat, lng]) => {
       const pt = map.latLngToContainerPoint(L.latLng(lat, lng));
       return [pt.x, pt.y];
     });
-    rasterizeForestPoly(screenPoly, px, band, ccBand);
+    rasterizeForestPoly(screenPoly, px, band);
   }
 
   // Roads rendered after trees — ground colour dithered over the forest pixels.
-  // The dither band lets tree pixels bleed into the road margin organically.
+  // The narrower road band gives a solid lit centre + visible dither shoulder
+  // even on residential roads that are only ~14 cells wide.
   for (const poly of roadPolys) {
     const screenPoly = poly.map(([lat, lng]) => {
       const pt = map.latLngToContainerPoint(L.latLng(lat, lng));
       return [pt.x, pt.y];
     });
-    rasterizeRoadPoly(screenPoly, px, band);
+    rasterizeRoadPoly(screenPoly, px, rdBand);
   }
 }
 
