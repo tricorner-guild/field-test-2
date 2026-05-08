@@ -1036,7 +1036,7 @@ out geom;`;
       // ── WAY elements ──
       if (el.type !== 'way' || !el.geometry || el.geometry.length < 2) continue;
       if (tags.highway) {
-        roads.push({ id: el.id, geometry: el.geometry, buffer: highwayBufferM(tags) });
+        roads.push({ id: el.id, geometry: el.geometry, buffer: highwayBufferM(tags), name: tags.name || null });
       } else if (tags.natural === 'water' || tags.waterway) {
         waters.push(el);
       } else if (tags.building) {
@@ -1212,8 +1212,10 @@ out geom;`;
     for (const r of roads) {
       if (r.buffer >= 7) continue;  // skip motorway / trunk / primary
       // Stagger start position per road so samples don't all line up
-      const roadId = r.geometry[0].lat * 1e5 + r.geometry[0].lon * 1e3;
-      let nextSample = ROAD_SAMPLE_M * (0.2 + gridRand(roadId) * 0.6);
+      const staggerSeed = r.geometry[0].lat * 1e5 + r.geometry[0].lon * 1e3;
+      // Group by street name when available so OSM segments of the same street count as one road
+      const roadId = r.name ? `n:${r.name}` : `i:${r.id}`;
+      let nextSample = ROAD_SAMPLE_M * (0.2 + gridRand(staggerSeed) * 0.6);
       let cumDist = 0;
       for (let i = 1; i < r.geometry.length; i++) {
         const [x1, y1] = toM(r.geometry[i-1].lat, r.geometry[i-1].lon);
@@ -1247,7 +1249,7 @@ out geom;`;
     const nearPool  = allCandidates.filter(c => { const d = distFromLoad(c); return d > IMMED_M && d <= NEAR_M; });
     const farPool   = allCandidates.filter(c => distFromLoad(c) > NEAR_M);
 
-    const immedSpaced = spacedAnchors(immedPool, 15, 10, 2);   // 8–10 quests, ≥15m apart, ≤2 per road
+    const immedSpaced = spacedAnchors(immedPool, 30, 10, 2);   // up to 10, ≥30m apart, ≤2 per road
     const nearSpaced  = spacedAnchors(nearPool,  60,  5, 2);   // up to 5, ≥60m apart, ≤2 per road
     const farSpaced   = spacedAnchors(farPool,  150, 10, 3);   // up to 10, ≥150m apart, ≤3 per road
     const spaced = [...immedSpaced, ...nearSpaced, ...farSpaced];
