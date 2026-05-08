@@ -941,15 +941,20 @@ function renderForest() {
 }
 
 // Ring-spiral selector: divides the area into concentric rings of width opts.ringWidth and
-// picks opts.anchorsPerRing from each, spread across 8 compass sectors. Effect: a short
-// walk only catches the inner-ring anchors; clearing the map requires real exploration.
+// picks N from each, spread across 8 compass sectors. opts.anchorsPerRing is either a
+// single number (uniform across all rings up to opts.maxRange) or an array — the schedule —
+// where index 0 is the innermost ring. Use the schedule form for front-loaded distribution
+// (e.g. [3, 2, 2, 1, 1, 1, 1, 1]: easy starter cluster, then tapering reward-for-effort).
 // Per-road cap is global; if a ring can't fill while respecting it, the cap is lifted just
 // for that ring so anchor count stays healthy in low-road-diversity areas.
 function spacedAnchors(candidates, originLat, originLng, opts) {
   if (!candidates.length) return [];
   const RING_WIDTH = opts.ringWidth;
-  const PER_RING = opts.anchorsPerRing;
-  const MAX_RANGE = opts.maxRange;
+  const SCHEDULE = Array.isArray(opts.anchorsPerRing)
+    ? opts.anchorsPerRing
+    : new Array(Math.floor((opts.maxRange || 1600) / RING_WIDTH)).fill(opts.anchorsPerRing);
+  const numRings = SCHEDULE.length;
+  const MAX_RANGE = numRings * RING_WIDTH;
   const MIN_DIST = opts.minDistM;
   const MAX_PER_ROAD = opts.maxPerRoad;
   const SECTORS = 8;
@@ -959,7 +964,6 @@ function spacedAnchors(candidates, originLat, originLng, opts) {
   const distM = (a, b) => Math.hypot((a.lat - b.lat) * mLat, (a.lng - b.lng) * mLng);
   const distFromOrigin = c => Math.hypot((c.lat - originLat) * mLat, (c.lng - originLng) * mLng);
 
-  const numRings = Math.floor(MAX_RANGE / RING_WIDTH);
   const ringBins = Array.from({ length: numRings }, () => []);
   for (const c of candidates) {
     const d = distFromOrigin(c);
@@ -973,7 +977,8 @@ function spacedAnchors(candidates, originLat, originLng, opts) {
   const tooCloseToKept = c => kept.some(k => distM(c, k) < MIN_DIST);
 
   for (let r = 0; r < numRings; r++) {
-    if (!ringBins[r].length) continue;
+    const ringQuota = SCHEDULE[r];
+    if (!ringQuota || !ringBins[r].length) continue;
 
     // Sub-bin this ring into 8 angular sectors, sorted closest-first
     const sectorBins = Array.from({ length: SECTORS }, () => []);
@@ -990,9 +995,9 @@ function spacedAnchors(candidates, originLat, originLng, opts) {
     // Pass 1: round-robin sectors with per-road cap
     let ringPicks = 0;
     let progressed = true;
-    while (progressed && ringPicks < PER_RING) {
+    while (progressed && ringPicks < ringQuota) {
       progressed = false;
-      for (let s = 0; s < SECTORS && ringPicks < PER_RING; s++) {
+      for (let s = 0; s < SECTORS && ringPicks < ringQuota; s++) {
         const bin = sectorBins[s];
         while (bin.length > 0) {
           const c = bin.shift();
@@ -1008,10 +1013,10 @@ function spacedAnchors(candidates, originLat, originLng, opts) {
     }
 
     // Pass 2: if ring underfilled, top up without per-road cap
-    if (ringPicks < PER_RING) {
+    if (ringPicks < ringQuota) {
       const leftovers = sectorBins.flat().sort((a, b) => distFromOrigin(a) - distFromOrigin(b));
       for (const c of leftovers) {
-        if (ringPicks >= PER_RING) break;
+        if (ringPicks >= ringQuota) break;
         if (tooCloseToKept(c)) continue;
         kept.push(c);
         if (c.roadId != null) roadCounts.set(c.roadId, (roadCounts.get(c.roadId) || 0) + 1);
@@ -1284,14 +1289,13 @@ out geom;`;
       }
     }
     // ── RING-SPIRAL DISTRIBUTION ──────────────────────────────────────────
-    // 2 anchors per 200m ring out to QUERY_RADIUS (1600m) → up to 16 anchors total,
-    // spread across compass sectors. A short walk catches only the inner-ring anchors;
-    // clearing the map requires real exploration.
+    // Front-loaded schedule: 3 starter anchors in the first 200m, then tapers.
+    // First 3 quests are an easy lap. Next 4 are walkable in a session.
+    // Final 5 require deliberate exploration. Total: up to 12 anchors over 1600m.
     const allCandidates = [...anchorCenters, ...synthCandidates];
     const spaced = spacedAnchors(allCandidates, lat, lng, {
       ringWidth: 200,
-      anchorsPerRing: 2,
-      maxRange: QUERY_RADIUS,
+      anchorsPerRing: [3, 2, 2, 1, 1, 1, 1, 1],
       minDistM: 30,
       maxPerRoad: 2,
     });
