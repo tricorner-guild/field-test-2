@@ -940,63 +940,83 @@ function renderForest() {
   }
 }
 
-// Angular-sector selector — divides candidates into 8 compass sectors around the player,
-// then round-robins through sectors picking the closest viable candidate from each. This
-// produces a balanced "spiral outward" spread instead of clustering on whichever side of
-// the player has the densest road data. Falls back to a no-cap pass if sectors run dry
-// before maxCount is reached, so anchor count stays healthy in low-density areas.
-function spacedAnchors(candidates, originLat, originLng, minDistM, maxCount, maxPerRoad) {
+// Ring-spiral selector: divides the area into concentric rings of width opts.ringWidth and
+// picks opts.anchorsPerRing from each, spread across 8 compass sectors. Effect: a short
+// walk only catches the inner-ring anchors; clearing the map requires real exploration.
+// Per-road cap is global; if a ring can't fill while respecting it, the cap is lifted just
+// for that ring so anchor count stays healthy in low-road-diversity areas.
+function spacedAnchors(candidates, originLat, originLng, opts) {
   if (!candidates.length) return [];
+  const RING_WIDTH = opts.ringWidth;
+  const PER_RING = opts.anchorsPerRing;
+  const MAX_RANGE = opts.maxRange;
+  const MIN_DIST = opts.minDistM;
+  const MAX_PER_ROAD = opts.maxPerRoad;
   const SECTORS = 8;
+
   const mLat = 111320;
   const mLng = 111320 * Math.cos(originLat * Math.PI / 180);
   const distM = (a, b) => Math.hypot((a.lat - b.lat) * mLat, (a.lng - b.lng) * mLng);
   const distFromOrigin = c => Math.hypot((c.lat - originLat) * mLat, (c.lng - originLng) * mLng);
 
-  // Bin candidates by sector (0 = north, clockwise), sort each bin closest-first
-  const bins = Array.from({ length: SECTORS }, () => []);
+  const numRings = Math.floor(MAX_RANGE / RING_WIDTH);
+  const ringBins = Array.from({ length: numRings }, () => []);
   for (const c of candidates) {
-    const dlat = (c.lat - originLat) * mLat;
-    const dlng = (c.lng - originLng) * mLng;
-    let ang = Math.atan2(dlng, dlat); // 0 = north, +x = clockwise toward east
-    if (ang < 0) ang += 2 * Math.PI;
-    const idx = Math.min(SECTORS - 1, Math.floor(ang / (2 * Math.PI) * SECTORS));
-    bins[idx].push(c);
+    const d = distFromOrigin(c);
+    if (d > MAX_RANGE) continue;
+    const idx = Math.min(numRings - 1, Math.floor(d / RING_WIDTH));
+    ringBins[idx].push(c);
   }
-  for (const bin of bins) bin.sort((a, b) => distFromOrigin(a) - distFromOrigin(b));
 
   const kept = [];
   const roadCounts = new Map();
-  const tooCloseToKept = c => kept.some(k => distM(c, k) < minDistM);
+  const tooCloseToKept = c => kept.some(k => distM(c, k) < MIN_DIST);
 
-  // Pass 1: round-robin through sectors. Each cycle picks the closest viable candidate
-  // from each sector (skipping ones that violate spacing or per-road cap). Repeats until
-  // a full cycle yields nothing new.
-  let progressed = true;
-  while (progressed && kept.length < maxCount) {
-    progressed = false;
-    for (let s = 0; s < SECTORS && kept.length < maxCount; s++) {
-      const bin = bins[s];
-      while (bin.length > 0) {
-        const c = bin.shift();
-        if (tooCloseToKept(c)) continue;
-        if (maxPerRoad && c.roadId != null && (roadCounts.get(c.roadId) || 0) >= maxPerRoad) continue;
-        kept.push(c);
-        if (c.roadId != null) roadCounts.set(c.roadId, (roadCounts.get(c.roadId) || 0) + 1);
-        progressed = true;
-        break;
+  for (let r = 0; r < numRings; r++) {
+    if (!ringBins[r].length) continue;
+
+    // Sub-bin this ring into 8 angular sectors, sorted closest-first
+    const sectorBins = Array.from({ length: SECTORS }, () => []);
+    for (const c of ringBins[r]) {
+      const dlat = (c.lat - originLat) * mLat;
+      const dlng = (c.lng - originLng) * mLng;
+      let ang = Math.atan2(dlng, dlat);
+      if (ang < 0) ang += 2 * Math.PI;
+      const idx = Math.min(SECTORS - 1, Math.floor(ang / (2 * Math.PI) * SECTORS));
+      sectorBins[idx].push(c);
+    }
+    for (const bin of sectorBins) bin.sort((a, b) => distFromOrigin(a) - distFromOrigin(b));
+
+    // Pass 1: round-robin sectors with per-road cap
+    let ringPicks = 0;
+    let progressed = true;
+    while (progressed && ringPicks < PER_RING) {
+      progressed = false;
+      for (let s = 0; s < SECTORS && ringPicks < PER_RING; s++) {
+        const bin = sectorBins[s];
+        while (bin.length > 0) {
+          const c = bin.shift();
+          if (tooCloseToKept(c)) continue;
+          if (MAX_PER_ROAD && c.roadId != null && (roadCounts.get(c.roadId) || 0) >= MAX_PER_ROAD) continue;
+          kept.push(c);
+          if (c.roadId != null) roadCounts.set(c.roadId, (roadCounts.get(c.roadId) || 0) + 1);
+          ringPicks++;
+          progressed = true;
+          break;
+        }
       }
     }
-  }
 
-  // Pass 2: if sectors emptied before maxCount, top up from any remaining candidates
-  // without the per-road cap so we don't starve in low-road-diversity areas.
-  if (kept.length < maxCount) {
-    const leftovers = bins.flat().sort((a, b) => distFromOrigin(a) - distFromOrigin(b));
-    for (const c of leftovers) {
-      if (kept.length >= maxCount) break;
-      if (tooCloseToKept(c)) continue;
-      kept.push(c);
+    // Pass 2: if ring underfilled, top up without per-road cap
+    if (ringPicks < PER_RING) {
+      const leftovers = sectorBins.flat().sort((a, b) => distFromOrigin(a) - distFromOrigin(b));
+      for (const c of leftovers) {
+        if (ringPicks >= PER_RING) break;
+        if (tooCloseToKept(c)) continue;
+        kept.push(c);
+        if (c.roadId != null) roadCounts.set(c.roadId, (roadCounts.get(c.roadId) || 0) + 1);
+        ringPicks++;
+      }
     }
   }
 
@@ -1263,24 +1283,18 @@ out geom;`;
         cumDist += segLen;
       }
     }
-    // ── THREE ZONES ───────────────────────────────────────────────────────
-    // IMMEDIATE (0 – 100 m):  8–10 QPs, ≥15m apart  — right at your doorstep
-    // NEAR      (100 – 400 m): up to 5 QPs, ≥60m apart — walkable this session
-    // FAR       (400 – 1600 m): up to 10 QPs, ≥150m apart — goals to explore
-    const IMMED_M = 100, NEAR_M = 400;
+    // ── RING-SPIRAL DISTRIBUTION ──────────────────────────────────────────
+    // 2 anchors per 200m ring out to QUERY_RADIUS (1600m) → up to 16 anchors total,
+    // spread across compass sectors. A short walk catches only the inner-ring anchors;
+    // clearing the map requires real exploration.
     const allCandidates = [...anchorCenters, ...synthCandidates];
-
-    const mLat = 111320, mLng = 111320 * Math.cos(lat * Math.PI / 180);
-    const distFromLoad = c => Math.hypot((c.lat - lat) * mLat, (c.lng - lng) * mLng);
-
-    const immedPool = allCandidates.filter(c => distFromLoad(c) <= IMMED_M);
-    const nearPool  = allCandidates.filter(c => { const d = distFromLoad(c); return d > IMMED_M && d <= NEAR_M; });
-    const farPool   = allCandidates.filter(c => distFromLoad(c) > NEAR_M);
-
-    const immedSpaced = spacedAnchors(immedPool, lat, lng, 30,  6, 2);   // up to 6,  ≥30m apart, ≤2 per road
-    const nearSpaced  = spacedAnchors(nearPool,  lat, lng, 60,  9, 2);   // up to 9,  ≥60m apart, ≤2 per road
-    const farSpaced   = spacedAnchors(farPool,   lat, lng, 150, 10, 3);  // up to 10, ≥150m apart, ≤3 per road
-    const spaced = [...immedSpaced, ...nearSpaced, ...farSpaced];
+    const spaced = spacedAnchors(allCandidates, lat, lng, {
+      ringWidth: 200,
+      anchorsPerRing: 2,
+      maxRange: QUERY_RADIUS,
+      minDistM: 30,
+      maxPerRoad: 2,
+    });
 
     for (const c of spaced) addAnchor(c.id, c.lat, c.lng);
     updateAnchorDOMPositions();
