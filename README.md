@@ -4,6 +4,8 @@
 
 A location-based mobile adventure game built on real-world GPS. Walk your actual neighborhood. Uncover a layered fantasy world beneath it.
 
+**[Live demo →](https://tricorner-guild.github.io/field-test-2/)**
+
 ---
 
 ## What It Is
@@ -41,7 +43,7 @@ Dragons are hidden until late game. The world is older than the player knows.
 
 ## Technical Overview
 
-The field test is a single-file web app (`field-test/index.html`) deployed via Netlify. No backend. No native app. Just GPS, canvas, and OpenStreetMap.
+The field test is a single-file web app (`field-test-v1.html`) deployed via GitHub Pages. No backend. No native app. Just GPS, canvas, and OpenStreetMap.
 
 **Stack:**
 - [Leaflet.js](https://leafletjs.com/) — map engine and GPS layer
@@ -63,28 +65,27 @@ The field test is a single-file web app (`field-test/index.html`) deployed via N
 
 ---
 
-## Field Test Files
+## Files
 
 | File | Purpose |
 |---|---|
-| `field-test/index.html` | Main app — live GPS, full game loop |
-| `field-test/pixel-test/` | Renderer sandbox — tune dither, blob shape, pixel size |
-| `field-test/road-test/` | Road shape sandbox — width wobble, node spacing, variety |
-| `field-test/neighborhood-test/` | Hardcoded location test — no GPS required (serves via HTTP) |
+| `field-test-v1.html` | Main app — live GPS, full game loop |
+| `index.html` | Redirect to the current field test version |
 
 ---
 
 ## Running Locally
 
-The field test fetches from the Overpass API and requires HTTP — `file://` will block cross-origin requests.
+The field test fetches from the Overpass API and requires HTTP — opening `field-test-v1.html` directly via `file://` will block cross-origin requests.
 
 ```bash
-cd field-test
 python3 -m http.server 8743
 # open http://localhost:8743
 ```
 
 Grant location access when prompted. The map loads around your real position.
+
+Or just visit the [live demo](https://tricorner-guild.github.io/field-test-2/).
 
 ---
 
