@@ -107,6 +107,28 @@ html,body{height:100%;overflow:hidden;background:var(--bg);font-family:'Courier 
 #loc-status{font-size:11px;letter-spacing:2px;color:var(--text2);text-transform:uppercase;text-align:center;margin-top:6px;min-height:16px;max-width:300px;line-height:1.7}
 #loc-status.success{color:var(--green2)}
 #loc-status.error{color:#e09060}
+.title-or{font-size:10px;letter-spacing:4px;color:var(--text2);text-transform:uppercase;opacity:.5}
+.addr-row{display:flex;gap:6px;align-items:stretch;max-width:300px}
+#addr-input{
+  flex:1;min-width:0;background:transparent;border:1px solid var(--border);color:var(--gold);
+  font-family:'Courier New',monospace;font-size:12px;letter-spacing:1px;
+  padding:12px 14px;outline:none;transition:border-color .2s;
+}
+#addr-input:focus{border-color:var(--green2)}
+#addr-input::placeholder{color:var(--text2);opacity:.5;letter-spacing:2px;text-transform:uppercase;font-size:11px}
+#btn-useaddr{
+  background:transparent;border:1px solid var(--border);color:var(--text2);
+  font-family:'Courier New',monospace;font-size:14px;
+  padding:0 18px;cursor:pointer;transition:all .2s;min-width:48px;
+}
+#btn-useaddr:active{background:var(--bg2);color:var(--gold)}
+#btn-useaddr.success{border-color:var(--green2);color:var(--green2)}
+#btn-useaddr.error{border-color:#c07040;color:#e09060}
+#btn-useaddr:disabled{opacity:.5;cursor:not-allowed}
+#addr-status{font-size:11px;letter-spacing:2px;color:var(--text2);text-transform:uppercase;text-align:center;max-width:300px;line-height:1.7}
+#addr-status:empty{display:none}
+#addr-status.success{color:var(--green2)}
+#addr-status.error{color:#e09060}
 .title-note{font-size:10px;letter-spacing:1px;color:#7a9a58;text-transform:uppercase;text-align:center;max-width:280px;line-height:2}
 
 /* ── HUD ─────────────────────────────────────────────── */
@@ -270,6 +292,12 @@ html,body{height:100%;overflow:hidden;background:var(--bg);font-family:'Courier 
   <div class="title-flavor">The forest does not wait for you. It has been here long before the roads, and it will be here long after.</div>
   <button id="btn-getloc">◉ Get Location</button>
   <div id="loc-status"></div>
+  <div class="title-or">— or —</div>
+  <div class="addr-row">
+    <input id="addr-input" type="text" placeholder="Enter address" autocomplete="off" autocapitalize="words" spellcheck="false">
+    <button id="btn-useaddr" type="button" title="Use address">→</button>
+  </div>
+  <div id="addr-status"></div>
   <button id="btn-begin" disabled>⬡ Begin Expedition</button>
   <div class="title-note">Requires location permission · Works best outdoors · Walk to green anchors to trigger encounters</div>
 </div>
@@ -1828,6 +1856,29 @@ updateHUD();
 // initial position, so a fuzzy fix puts everything in the wrong place.
 const TITLE_ACCURACY_THRESHOLD_M = 50;
 
+// Set when the player chose to enter an address instead of using GPS.
+// In this mode we skip watchPosition and feed a single synthetic fix into
+// the normal first-position pipeline — the player is anchored in place.
+let staticOrigin = null;
+
+function clearAddressUI() {
+  const btn = document.getElementById('btn-useaddr');
+  const status = document.getElementById('addr-status');
+  btn.classList.remove('success', 'error');
+  btn.textContent = '→';
+  status.classList.remove('success', 'error');
+  status.textContent = '';
+}
+
+function clearLocationUI() {
+  const btn = document.getElementById('btn-getloc');
+  const status = document.getElementById('loc-status');
+  btn.classList.remove('success', 'error');
+  btn.textContent = '◉ Get Location';
+  status.classList.remove('success', 'error');
+  status.textContent = '';
+}
+
 document.getElementById('btn-getloc').addEventListener('click', () => {
   const btn = document.getElementById('btn-getloc');
   const status = document.getElementById('loc-status');
@@ -1868,6 +1919,9 @@ document.getElementById('btn-getloc').addEventListener('click', () => {
       status.classList.add('success');
       status.textContent = `±${Math.round(accuracy)}m · ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
       beginBtn.disabled = false;
+      // GPS wins — discard any earlier address selection
+      staticOrigin = null;
+      clearAddressUI();
     },
     (err) => {
       btn.textContent = '◉ Try Again';
@@ -1908,11 +1962,77 @@ document.getElementById('btn-dev').addEventListener('click', () => {
   }
 });
 
+// Geocode an address via Nominatim (OSM's free geocoder, no API key).
+// CORS is permitted; usage policy asks for low volume which fits this prototype.
+async function geocodeAddress(query) {
+  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1&addressdetails=0`;
+  const res = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+  if (!res.ok) throw new Error('lookup-failed');
+  const data = await res.json();
+  if (!Array.isArray(data) || !data.length) throw new Error('not-found');
+  return {
+    lat: parseFloat(data[0].lat),
+    lng: parseFloat(data[0].lon),
+    display: data[0].display_name || query,
+  };
+}
+
+document.getElementById('btn-useaddr').addEventListener('click', async () => {
+  const input = document.getElementById('addr-input');
+  const btn = document.getElementById('btn-useaddr');
+  const status = document.getElementById('addr-status');
+  const beginBtn = document.getElementById('btn-begin');
+  const query = input.value.trim();
+  if (!query) {
+    status.classList.remove('success');
+    status.classList.add('error');
+    status.textContent = 'Enter an address';
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = '…';
+  btn.classList.remove('error', 'success');
+  status.classList.remove('error', 'success');
+  status.textContent = 'Searching…';
+  try {
+    const result = await geocodeAddress(query);
+    staticOrigin = { lat: result.lat, lng: result.lng };
+    btn.classList.add('success');
+    btn.textContent = '✓';
+    status.classList.add('success');
+    const shortDisplay = result.display.split(',').slice(0, 2).join(',').trim();
+    status.textContent = `${shortDisplay} · ${result.lat.toFixed(4)}, ${result.lng.toFixed(4)}`;
+    beginBtn.disabled = false;
+    // Address wins — discard any earlier GPS reading
+    clearLocationUI();
+  } catch (e) {
+    btn.classList.add('error');
+    btn.textContent = '→';
+    status.classList.add('error');
+    status.textContent = e.message === 'not-found' ? 'Address not found' : 'Lookup failed';
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+document.getElementById('addr-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    document.getElementById('btn-useaddr').click();
+  }
+});
+
 document.getElementById('btn-begin').addEventListener('click', () => {
   if (document.getElementById('btn-begin').disabled) return;
   document.getElementById('title-screen').classList.add('hidden');
   showLoading();
-  startGPS();
+  if (staticOrigin) {
+    // Static-address mode: feed a single synthetic position into onPosition.
+    // No watchPosition — the player stays anchored at the chosen address.
+    onPosition({ coords: { latitude: staticOrigin.lat, longitude: staticOrigin.lng } });
+  } else {
+    startGPS();
+  }
 });
 </script>
 </body>
