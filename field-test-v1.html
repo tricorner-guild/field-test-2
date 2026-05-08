@@ -1035,9 +1035,10 @@ function spacedAnchors(candidates, originLat, originLng, opts) {
   };
 
   // Phase 1 — coverage: closest valid candidate at the horizon distance per
-  // sector. If no candidate in a sector reaches the horizon, fall back to the
-  // closest available so coverage isn't lost in directions where the urban
-  // area doesn't extend that far.
+  // sector. If a sector has no candidate past the horizon (water, urban edge),
+  // fall back to the FARTHEST candidate in that sector — better to land at
+  // the edge of where roads exist than dump a coverage anchor next to the
+  // player and ruin the spread.
   for (let s = 0; s < SECTORS; s++) {
     let placed = false;
     for (const c of sectorPools[s]) {
@@ -1045,8 +1046,8 @@ function spacedAnchors(candidates, originLat, originLng, opts) {
       if (tryPick(c)) { placed = true; break; }
     }
     if (placed || COVERAGE_MIN_DIST === 0) continue;
-    for (const c of sectorPools[s]) {
-      if (tryPick(c)) break;
+    for (let i = sectorPools[s].length - 1; i >= 0; i--) {
+      if (tryPick(sectorPools[s][i])) break;
     }
   }
 
