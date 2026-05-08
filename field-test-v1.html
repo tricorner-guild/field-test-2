@@ -1485,21 +1485,53 @@ function initFogLayer() {
         visitPoints.push(L.latLng(pt.lat, pt.lng));
       }
 
-      for (const pt of visitPoints) {
-        const containerPt = this._map.latLngToContainerPoint(pt);
-        const radiusPx = VISIT_RADIUS * pixelsPerMetre;
-        const featherRadius = radiusPx * 1.4; // Subtle feathering
+      // Chunky pixel-cell dither erase — matches the FOREST_BAYER aesthetic
+      const FOG_PX = 4;
+      const innerR = VISIT_RADIUS * pixelsPerMetre;
+      const outerR = innerR * 1.4;
+      const innerR2 = innerR * innerR;
+      const outerR2 = outerR * outerR;
+      const transWidth = outerR - innerR;
 
-        // Create radial gradient for feathered edge
-        const gradient = ctx.createRadialGradient(containerPt.x, containerPt.y, 0, containerPt.x, containerPt.y, featherRadius);
-        gradient.addColorStop(0, 'rgba(0, 0, 0, 1)');        // Fully opaque at center
-        gradient.addColorStop(0.7, 'rgba(0, 0, 0, 0.9)');    // Subtle fade
-        gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');        // Fully transparent at edge
+      const screenPts = visitPoints.map(pt => this._map.latLngToContainerPoint(pt));
 
-        ctx.fillStyle = gradient;
-        ctx.beginPath();
-        ctx.arc(containerPt.x, containerPt.y, featherRadius, 0, Math.PI * 2);
-        ctx.fill();
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      for (const cp of screenPts) {
+        if (cp.x - outerR < minX) minX = cp.x - outerR;
+        if (cp.x + outerR > maxX) maxX = cp.x + outerR;
+        if (cp.y - outerR < minY) minY = cp.y - outerR;
+        if (cp.y + outerR > maxY) maxY = cp.y + outerR;
+      }
+      const x0 = Math.max(0, Math.floor(minX / FOG_PX) * FOG_PX);
+      const y0 = Math.max(0, Math.floor(minY / FOG_PX) * FOG_PX);
+      const x1 = Math.min(canvas.width, Math.ceil(maxX / FOG_PX) * FOG_PX);
+      const y1 = Math.min(canvas.height, Math.ceil(maxY / FOG_PX) * FOG_PX);
+
+      ctx.fillStyle = '#000';
+      for (let py = y0; py < y1; py += FOG_PX) {
+        for (let px = x0; px < x1; px += FOG_PX) {
+          const cxc = px + FOG_PX / 2;
+          const cyc = py + FOG_PX / 2;
+          let minT = Infinity;
+          for (const cp of screenPts) {
+            const dx = cxc - cp.x, dy = cyc - cp.y;
+            const d2 = dx * dx + dy * dy;
+            if (d2 >= outerR2) continue;
+            if (d2 <= innerR2) { minT = -1; break; }
+            const t = (Math.sqrt(d2) - innerR) / transWidth;
+            if (t < minT) minT = t;
+          }
+          if (minT === Infinity) continue;
+          if (minT <= 0) {
+            ctx.fillRect(px, py, FOG_PX, FOG_PX);
+          } else {
+            const bx = ((px / FOG_PX) % 4 + 4) % 4;
+            const by = ((py / FOG_PX) % 4 + 4) % 4;
+            if (FOREST_BAYER[by][bx] / 16 < 1 - minT) {
+              ctx.fillRect(px, py, FOG_PX, FOG_PX);
+            }
+          }
+        }
       }
 
       ctx.globalCompositeOperation = 'source-over';
