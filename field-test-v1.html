@@ -1249,8 +1249,8 @@ out geom;`;
     const nearPool  = allCandidates.filter(c => { const d = distFromLoad(c); return d > IMMED_M && d <= NEAR_M; });
     const farPool   = allCandidates.filter(c => distFromLoad(c) > NEAR_M);
 
-    const immedSpaced = spacedAnchors(immedPool, 30, 10, 2);   // up to 10, ≥30m apart, ≤2 per road
-    const nearSpaced  = spacedAnchors(nearPool,  60,  5, 2);   // up to 5, ≥60m apart, ≤2 per road
+    const immedSpaced = spacedAnchors(immedPool, 30,  6, 2);   // up to 6,  ≥30m apart, ≤2 per road
+    const nearSpaced  = spacedAnchors(nearPool,  60,  9, 2);   // up to 9,  ≥60m apart, ≤2 per road
     const farSpaced   = spacedAnchors(farPool,  150, 10, 3);   // up to 10, ≥150m apart, ≤3 per road
     const spaced = [...immedSpaced, ...nearSpaced, ...farSpaced];
 
