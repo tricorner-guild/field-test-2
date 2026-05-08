@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>Tree Design Test — AMBRÔUGH</title>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#415c30;
+  --panel:rgba(6,14,3,.95);
+  --border:#2a5010;
+  --gold:#c8b060;
+  --text:#e8e4c0;
+  --text2:#b8cc90;
+  --green2:#4aaa30;
+}
+html,body{height:100%;overflow:hidden;background:var(--bg);font-family:'Courier New',monospace;color:var(--text)}
+canvas{display:block;position:fixed;inset:0}
+#controls{
+  position:fixed;top:14px;left:14px;z-index:10;
+  background:var(--panel);border:1px solid var(--border);
+  padding:14px 16px;border-radius:3px;
+  display:flex;flex-direction:column;gap:10px;
+  min-width:250px;user-select:none;
+}
+h3{color:var(--gold);letter-spacing:3px;font-size:11px;text-transform:uppercase;
+   border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:2px}
+.row{display:flex;align-items:center;gap:8px;font-size:11px;letter-spacing:1px;text-transform:uppercase}
+.row label{flex:1;color:var(--text2)}
+.row input[type=range]{flex:1.4;accent-color:var(--green2);cursor:pointer}
+.row .val{width:26px;text-align:right;color:var(--gold);font-size:11px}
+.row input[type=color]{width:30px;height:22px;border:1px solid var(--border);background:none;cursor:pointer;padding:1px;border-radius:2px}
+.row input[type=checkbox]{accent-color:var(--green2);cursor:pointer;width:14px;height:14px}
+.hint{font-size:10px;color:var(--text2);letter-spacing:0.5px;line-height:1.5;text-transform:none;border-top:1px solid var(--border);padding-top:8px}
+#perf{font-size:10px;letter-spacing:1px;color:var(--green2);text-transform:uppercase;border-top:1px solid var(--border);padding-top:8px}
+.save-row{display:flex;gap:8px;border-top:1px solid var(--border);padding-top:10px}
+.btn{flex:1;padding:7px 0;font-family:'Courier New',monospace;font-size:10px;letter-spacing:2px;text-transform:uppercase;cursor:pointer;border-radius:2px;border:1px solid var(--border)}
+.btn-save{background:var(--gold);color:#0a1a05;border-color:var(--gold)}
+.btn-save:active{opacity:0.75}
+.btn-reset{background:none;color:var(--text2);border-color:var(--border)}
+.btn-reset:active{opacity:0.5}
+#save-msg{font-size:10px;color:var(--gold);letter-spacing:1px;text-align:center;height:14px;text-transform:uppercase}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="controls">
+  <h3>Tree Design Test</h3>
+
+  <div class="row">
+    <label>Pixel Size</label>
+    <input type="range" id="sl-px" min="2" max="18" value="8" step="1">
+    <span class="val" id="v-px">10</span>
+  </div>
+  <div class="row">
+    <label>Dither Band</label>
+    <input type="range" id="sl-band" min="1" max="16" value="9" step="1">
+    <span class="val" id="v-band">10</span>
+  </div>
+  <div class="row">
+    <label>Vertices</label>
+    <input type="range" id="sl-vert" min="12" max="160" value="160" step="4">
+    <span class="val" id="v-vert">160</span>
+  </div>
+  <div class="row">
+    <label>Spike Depth</label>
+    <input type="range" id="sl-spike" min="0" max="100" value="100" step="1">
+    <span class="val" id="v-spike">100</span>
+  </div>
+  <div class="row">
+    <label>Density</label>
+    <input type="range" id="sl-dens" min="2" max="12" value="6" step="1">
+    <span class="val" id="v-dens">6</span>
+  </div>
+  <div class="row">
+    <label>Edge Color</label>
+    <input type="color" id="sl-edge" value="#2d4623">
+  </div>
+  <div class="row">
+    <label>Mid Color</label>
+    <input type="color" id="sl-mid" value="#28411e">
+  </div>
+  <div class="row">
+    <label>Inner Color</label>
+    <input type="color" id="sl-inner" value="#233c19">
+  </div>
+  <div class="row">
+    <label>Deep Color</label>
+    <input type="color" id="sl-deep" value="#1e3714">
+  </div>
+  <div class="row">
+    <label>Core Dark</label>
+    <input type="color" id="sl-core" value="#19320f">
+  </div>
+  <div class="row">
+    <label>Core Light</label>
+    <input type="color" id="sl-core2" value="#1e3714">
+  </div>
+  <div class="row">
+    <label>Core Texture</label>
+    <input type="range" id="sl-ctex" min="0" max="100" value="45" step="1">
+    <span class="val" id="v-ctex">45</span>
+  </div>
+  <div class="row">
+    <label>Tex Scale</label>
+    <input type="range" id="sl-cscale" min="1" max="12" value="1" step="1">
+    <span class="val" id="v-cscale">1</span>
+  </div>
+
+  <div class="row" style="border-top:1px solid var(--border);padding-top:8px;margin-top:2px">
+    <label>CC Dark</label>
+    <input type="color" id="sl-cc1" value="#19320f">
+  </div>
+  <div class="row">
+    <label>CC Dark 2</label>
+    <input type="color" id="sl-cc1b" value="#0f2008">
+  </div>
+  <div class="row">
+    <label>CC Dark Tex</label>
+    <input type="range" id="sl-ccdtex" min="0" max="100" value="45" step="1">
+    <span class="val" id="v-ccdtex">45</span>
+  </div>
+  <div class="row">
+    <label>CC Light</label>
+    <input type="color" id="sl-cc2" value="#142d0a">
+  </div>
+  <div class="row">
+    <label>CC Texture</label>
+    <input type="range" id="sl-cctex" min="0" max="100" value="39" step="1">
+    <span class="val" id="v-cctex">50</span>
+  </div>
+  <div class="row">
+    <label>CC Scale</label>
+    <input type="range" id="sl-ccscale" min="1" max="12" value="2" step="1">
+    <span class="val" id="v-ccscale">2</span>
+  </div>
+  <div class="row">
+    <label>CC Radius</label>
+    <input type="range" id="sl-ccband" min="1" max="20" value="7" step="1">
+    <span class="val" id="v-ccband">5</span>
+  </div>
+  <div class="row">
+    <label>Show Grid</label>
+    <input type="checkbox" id="cb-grid">
+    <span style="color:var(--text2);font-size:10px;text-transform:none">debug cells</span>
+  </div>
+
+  <div class="save-row">
+    <button class="btn btn-save" id="btn-save">⬤ Save</button>
+    <button class="btn btn-reset" id="btn-reset">Reset</button>
+  </div>
+  <div id="save-msg"></div>
+
+  <div id="perf">— ms · — cells</div>
+</div>
+
+<script>
+'use strict';
+
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+
+let PIXEL_SIZE    = 8;
+let DITHER_BAND   = 9;
+let NVERT         = 160;
+let SPIKE_AMP     = 1.0;
+let GRID_COLS     = 6;
+let FILL_EDGE     = '#2d4623';
+let FILL_MID      = '#28411e';
+let FILL_INNER    = '#233c19';
+let FILL_DEEP     = '#1e3714';
+let FILL_CORE     = '#19320f';
+let FILL_CORE2    = '#1e3714';  // core light — lighter tone for internal texture
+let CORE_TEXTURE  = 0.45;       // 0 = solid core · 1 = fully dithered
+let CORE_SCALE    = 1;          // cell grouping size — 1 = per-cell, higher = blotchy patches
+
+// ── CORE CORE — deepest interior zone ────────────────────────────────────
+let CC_BAND       = 7;          // depth cells beyond DITHER_BAND before core-core kicks in
+let FILL_CC1      = '#19320f';  // core-core dark
+let FILL_CC1b     = '#0f2008';  // core-core dark secondary (dither companion)
+let CC_DARK_TEX   = 0.45;       // dither density within CC Dark cells
+let FILL_CC2      = '#142d0a';  // core-core light
+let CC_TEXTURE    = 0.39;       // dither density between CC Dark and CC Light
+let CC_SCALE      = 2;          // noise scale for core-core
+let SHOW_GRID     = false;
+
+const BAYER = [
+  [ 0,  8,  2, 10],
+  [12,  4, 14,  6],
+  [ 3, 11,  1,  9],
+  [15,  7, 13,  5]
+];
+
+function seededRand(seed) {
+  let s = seed | 0;
+  return () => {
+    s = Math.imul(s ^ (s >>> 15), 0xd168aaad) | 0;
+    s = Math.imul(s ^ (s >>> 13), 0xaf723597) | 0;
+    return ((s ^ (s >>> 15)) >>> 0) / 0xFFFFFFFF;
+  };
+}
+
+// Hash-based noise — no repeating pattern, fully aperiodic
+function cellNoise(cx, cy) {
+  const gx = Math.floor(cx / CORE_SCALE);
+  const gy = Math.floor(cy / CORE_SCALE);
+  let h = Math.imul(gx * 1619 + gy * 31337, 0x45d9f3b) | 0;
+  h = Math.imul(h ^ (h >>> 16), 0x45d9f3b) | 0;
+  h = Math.imul(h ^ (h >>> 16), 0x119de1f3) | 0;
+  return ((h ^ (h >>> 16)) >>> 0) / 0xFFFFFFFF;
+}
+
+function makeBlob(cx, cy, rx, ry, nVerts, seed) {
+  const rand  = seededRand(seed);
+  const comps = [];
+  for (let k = 1; k <= 5; k++) {
+    comps.push({ k, amp: rand() * SPIKE_AMP / k, phase: rand() * Math.PI * 2 });
+  }
+  const pts = [];
+  for (let i = 0; i < nVerts; i++) {
+    const base   = (i / nVerts) * Math.PI * 2;
+    const jitter = (rand() - 0.5) * (Math.PI / nVerts * 0.8);
+    const t      = base + jitter;
+    let r = 1.0;
+    for (const c of comps) r += c.amp * Math.abs(Math.cos(c.k * t + c.phase));
+    pts.push([cx + Math.cos(t) * rx * r, cy + Math.sin(t) * ry * r]);
+  }
+  return pts;
+}
+
+function ptInPoly(px, py, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i][0], yi = poly[i][1];
+    const xj = poly[j][0], yj = poly[j][1];
+    if (((yi > py) !== (yj > py)) && px < (xj - xi) * (py - yi) / (yj - yi) + xi)
+      inside = !inside;
+  }
+  return inside;
+}
+
+function rasterizePoly(poly) {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const [x, y] of poly) {
+    if (x < minX) minX = x; if (x > maxX) maxX = x;
+    if (y < minY) minY = y; if (y > maxY) maxY = y;
+  }
+  const pad   = DITHER_BAND + 1;
+  const cMinX = Math.floor(minX / PIXEL_SIZE) - pad;
+  const cMinY = Math.floor(minY / PIXEL_SIZE) - pad;
+  const cMaxX = Math.ceil (maxX / PIXEL_SIZE) + pad;
+  const cMaxY = Math.ceil (maxY / PIXEL_SIZE) + pad;
+  const cols  = cMaxX - cMinX;
+  const rows  = cMaxY - cMinY;
+
+  const grid = new Uint8Array(cols * rows);
+  for (let cj = 0; cj < rows; cj++) {
+    const sy = (cMinY + cj) * PIXEL_SIZE + PIXEL_SIZE * 0.5;
+    for (let ci = 0; ci < cols; ci++) {
+      const sx = (cMinX + ci) * PIXEL_SIZE + PIXEL_SIZE * 0.5;
+      if (ptInPoly(sx, sy, poly)) grid[cj * cols + ci] = 1;
+    }
+  }
+
+  const DIRS    = [[1,0],[-1,0],[0,1],[0,-1]];
+  const t1      = DITHER_BAND * 0.25;         // edge  → mid
+  const t2      = DITHER_BAND * 0.50;         // mid   → inner
+  const t3      = DITHER_BAND * 0.75;         // inner → deep
+  const maxD    = DITHER_BAND + CC_BAND;      // search ceiling
+  const ccThresh = DITHER_BAND + CC_BAND;     // cells deeper than this → core-core
+  let count = 0;
+
+  for (let cj = 0; cj < rows; cj++) {
+    for (let ci = 0; ci < cols; ci++) {
+      if (!grid[cj * cols + ci]) continue;
+      let depth = maxD;
+      for (const [dci, dcj] of DIRS) {
+        for (let d = 1; d <= maxD; d++) {
+          const ni = ci + dci * d, nj = cj + dcj * d;
+          if (ni < 0 || ni >= cols || nj < 0 || nj >= rows || !grid[nj * cols + ni]) {
+            if (d < depth) depth = d; break;
+          }
+        }
+        if (depth === 1) break;
+      }
+      const sx = (cMinX + ci) * PIXEL_SIZE;
+      const sy = (cMinY + cj) * PIXEL_SIZE;
+      if (depth >= ccThresh) {
+        // Core-core — deepest interior, own noise dither
+        const n = cellNoise((cMinX + ci) / CC_SCALE, (cMinY + cj) / CC_SCALE);
+        if (n < CC_TEXTURE) {
+          ctx.fillStyle = FILL_CC2;  // CC Light
+        } else {
+          // CC Dark — secondary dither between CC Dark and CC Dark secondary
+          const n2 = cellNoise((cMinX + ci) * 1.7 + 31, (cMinY + cj) * 1.7 + 17);
+          ctx.fillStyle = (n2 < CC_DARK_TEX) ? FILL_CC1b : FILL_CC1;
+        }
+        ctx.fillRect(sx, sy, PIXEL_SIZE, PIXEL_SIZE);
+        count++;
+      } else if (depth >= DITHER_BAND) {
+        // Core — hash noise dither between core dark and core light
+        const n = cellNoise(cMinX + ci, cMinY + cj);
+        ctx.fillStyle = (n < CORE_TEXTURE) ? FILL_CORE2 : FILL_CORE;
+        ctx.fillRect(sx, sy, PIXEL_SIZE, PIXEL_SIZE);
+        count++;
+      } else {
+        // Dither band — 4 zones (Bayer)
+        const density = depth / DITHER_BAND;
+        const bx = ((cMinX + ci) % 4 + 4) % 4;
+        const by = ((cMinY + cj) % 4 + 4) % 4;
+        if (BAYER[by][bx] / 16 < density) {
+          ctx.fillStyle = depth <= t1 ? FILL_EDGE : depth <= t2 ? FILL_MID : depth <= t3 ? FILL_INNER : FILL_DEEP;
+          ctx.fillRect(sx, sy, PIXEL_SIZE, PIXEL_SIZE);
+          count++;
+        }
+      }
+      if (SHOW_GRID) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+        ctx.lineWidth = 0.5;
+        ctx.strokeRect(sx + 0.5, sy + 0.5, PIXEL_SIZE - 1, PIXEL_SIZE - 1);
+      }
+    }
+  }
+  return count;
+}
+
+let treeBlobs = [];
+
+function buildPolys() {
+  const W = canvas.width, H = canvas.height;
+  const rows = Math.round(GRID_COLS * (H / W));
+  const tRx  = W / GRID_COLS * 0.55;
+  const tRy  = H / rows * 0.55;
+  const rand  = seededRand(0xF07E5700);
+  treeBlobs   = [];
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < GRID_COLS; col++) {
+      const baseX = (col + 0.5) * (W / GRID_COLS);
+      const baseY = (row + 0.5) * (H / rows);
+      const jx   = (rand() - 0.5) * tRx * 1.6;
+      const jy   = (rand() - 0.5) * tRy * 1.6;
+      const rx   = tRx * (0.6 + rand() * 0.9);
+      const ry   = tRy * (0.6 + rand() * 0.9);
+      const seed = (0xA000 + row * GRID_COLS + col) >>> 0;
+      treeBlobs.push(makeBlob(baseX + jx, baseY + jy, rx, ry, NVERT, seed));
+    }
+  }
+}
+
+function render() {
+  const t0 = performance.now();
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  let cells = 0;
+  for (const blob of treeBlobs) cells += rasterizePoly(blob);
+  const ms = (performance.now() - t0).toFixed(1);
+  document.getElementById('perf').textContent = `${ms} ms · ${cells.toLocaleString()} cells`;
+}
+
+function rebuild() { buildPolys(); render(); }
+
+function bind(id, valId, fn) {
+  const el = document.getElementById(id);
+  const vl = valId ? document.getElementById(valId) : null;
+  el.addEventListener('input', function() {
+    if (vl) vl.textContent = this.value;
+    fn(+this.value);
+  });
+}
+
+bind('sl-px',   'v-px',   v => { PIXEL_SIZE  = v; render(); });
+bind('sl-band', 'v-band', v => { DITHER_BAND = v; render(); });
+bind('sl-vert', 'v-vert', v => { NVERT       = v; rebuild(); });
+bind('sl-spike','v-spike',v => { SPIKE_AMP   = v / 100; rebuild(); });
+bind('sl-dens', 'v-dens', v => { GRID_COLS   = v; rebuild(); });
+
+document.getElementById('sl-edge' ).addEventListener('input', function() { FILL_EDGE  = this.value; render(); });
+document.getElementById('sl-mid'  ).addEventListener('input', function() { FILL_MID   = this.value; render(); });
+document.getElementById('sl-inner').addEventListener('input', function() { FILL_INNER = this.value; render(); });
+document.getElementById('sl-deep' ).addEventListener('input', function() { FILL_DEEP  = this.value; render(); });
+document.getElementById('sl-core' ).addEventListener('input', function() { FILL_CORE  = this.value; render(); });
+document.getElementById('sl-core2').addEventListener('input', function() { FILL_CORE2 = this.value; render(); });
+bind('sl-ctex',   'v-ctex',   v => { CORE_TEXTURE = v / 100; render(); });
+bind('sl-cscale', 'v-cscale', v => { CORE_SCALE   = v;       render(); });
+
+document.getElementById('sl-cc1'    ).addEventListener('input', function() { FILL_CC1   = this.value; render(); });
+document.getElementById('sl-cc1b'   ).addEventListener('input', function() { FILL_CC1b  = this.value; render(); });
+bind('sl-ccdtex', 'v-ccdtex', v => { CC_DARK_TEX = v / 100; render(); });
+document.getElementById('sl-cc2'    ).addEventListener('input', function() { FILL_CC2   = this.value; render(); });
+bind('sl-cctex',  'v-cctex',  v => { CC_TEXTURE  = v / 100; render(); });
+bind('sl-ccscale','v-ccscale',v => { CC_SCALE    = v;       render(); });
+bind('sl-ccband', 'v-ccband', v => { CC_BAND     = v;       render(); });
+document.getElementById('cb-grid').addEventListener('change', function() { SHOW_GRID = this.checked; render(); });
+
+// ── SAVE / LOAD ───────────────────────────────────────────────────────────
+const STORAGE_KEY = 'ambrogh_tree_settings';
+
+const DEFAULTS = {
+  'sl-px':8,'sl-band':9,'sl-vert':160,'sl-spike':100,'sl-dens':6,
+  'sl-edge':'#2d4623','sl-mid':'#28411e','sl-inner':'#233c19','sl-deep':'#1e3714',
+  'sl-core':'#19320f','sl-core2':'#1e3714',
+  'sl-ctex':45,'sl-cscale':1,
+  'sl-cc1':'#19320f','sl-cc1b':'#0f2008','sl-ccdtex':45,
+  'sl-cc2':'#142d0a','sl-cctex':39,'sl-ccscale':2,'sl-ccband':7
+};
+
+function collectSettings() {
+  const s = {};
+  for (const id of Object.keys(DEFAULTS)) {
+    const el = document.getElementById(id);
+    if (el) s[id] = el.type === 'checkbox' ? el.checked : el.value;
+  }
+  return s;
+}
+
+function applySettings(s) {
+  for (const [id, val] of Object.entries(s)) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    if (el.type === 'checkbox') el.checked = val;
+    else el.value = val;
+    el.dispatchEvent(new Event('input'));
+  }
+}
+
+document.getElementById('btn-save').addEventListener('click', () => {
+  const s = collectSettings();
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+  const msg = document.getElementById('save-msg');
+  msg.textContent = '✓ saved';
+  setTimeout(() => msg.textContent = '', 2000);
+});
+
+document.getElementById('btn-reset').addEventListener('click', () => {
+  localStorage.removeItem(STORAGE_KEY);
+  applySettings(DEFAULTS);
+  rebuild();
+  const msg = document.getElementById('save-msg');
+  msg.textContent = 'reset to defaults';
+  setTimeout(() => msg.textContent = '', 2000);
+});
+
+// Load saved settings on startup
+const saved = localStorage.getItem(STORAGE_KEY);
+if (saved) {
+  try { applySettings(JSON.parse(saved)); } catch(e) { /* ignore corrupt */ }
+}
+
+window.addEventListener('resize', () => {
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+  rebuild();
+});
+
+canvas.width  = window.innerWidth;
+canvas.height = window.innerHeight;
+rebuild();
+</script>
+</body>
+</html>

@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>Road Design Test — AMBRÔUGH</title>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#1a3010;
+  --panel:rgba(6,14,3,.96);
+  --border:#2a5010;
+  --gold:#c8b060;
+  --text:#e8e4c0;
+  --text2:#b8cc90;
+  --green2:#4aaa30;
+}
+html,body{height:100%;overflow:hidden;background:var(--bg);font-family:'Courier New',monospace;color:var(--text)}
+canvas{display:block;position:fixed;inset:0}
+
+#controls{
+  position:fixed;top:14px;left:14px;z-index:10;
+  background:var(--panel);border:1px solid var(--border);
+  padding:14px 16px;border-radius:3px;
+  display:flex;flex-direction:column;gap:10px;
+  min-width:260px;user-select:none;
+}
+h3{color:var(--gold);letter-spacing:3px;font-size:11px;text-transform:uppercase;
+   border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:2px}
+.section{color:var(--text2);font-size:9px;letter-spacing:2px;text-transform:uppercase;
+         border-top:1px solid var(--border);padding-top:8px;margin-top:2px}
+.row{display:flex;align-items:center;gap:8px;font-size:11px;letter-spacing:1px;text-transform:uppercase}
+.row label{flex:1;color:var(--text2)}
+.row input[type=range]{flex:1.4;accent-color:var(--green2);cursor:pointer}
+.row .val{width:30px;text-align:right;color:var(--gold);font-size:11px}
+#perf{font-size:10px;letter-spacing:1px;color:var(--green2);text-transform:uppercase;
+      border-top:1px solid var(--border);padding-top:8px}
+.hint{font-size:10px;color:var(--text2);letter-spacing:0.5px;line-height:1.6;
+      text-transform:none;border-top:1px solid var(--border);padding-top:8px}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="controls">
+  <h3>Road Design Test</h3>
+
+  <div class="section">Renderer</div>
+  <div class="row">
+    <label>Pixel Size</label>
+    <input type="range" id="sl-px" min="2" max="18" value="8" step="1">
+    <span class="val" id="v-px">8</span>
+  </div>
+  <div class="row">
+    <label>Dither Band</label>
+    <input type="range" id="sl-band" min="1" max="16" value="10" step="1">
+    <span class="val" id="v-band">10</span>
+  </div>
+
+  <div class="section">Road Shape</div>
+  <div class="row">
+    <label>Width</label>
+    <input type="range" id="sl-width" min="4" max="120" value="118" step="1">
+    <span class="val" id="v-width">118</span>
+  </div>
+  <div class="row">
+    <label>Nodes</label>
+    <input type="range" id="sl-nodes" min="2" max="32" value="32" step="1">
+    <span class="val" id="v-nodes">32</span>
+  </div>
+  <div class="row">
+    <label>Spacing</label>
+    <input type="range" id="sl-space" min="10" max="140" value="76" step="2">
+    <span class="val" id="v-space">76</span>
+  </div>
+  <div class="row">
+    <label>Variety</label>
+    <input type="range" id="sl-var" min="0" max="100" value="45" step="1">
+    <span class="val" id="v-var">45</span>
+  </div>
+
+  <div id="perf">— ms</div>
+
+  <div class="hint">
+    Nodes × Spacing = section length<br>
+    Variety: 0 = uniform · 100 = wild width swings<br>
+    Gold lines mark node positions
+  </div>
+</div>
+
+<script>
+'use strict';
+
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+
+// ── TUNABLE STATE ─────────────────────────────────────────────────────────
+let PIXEL_SIZE  = 8;
+let DITHER_BAND = 10;
+let ROAD_WIDTH  = 118;  // base half-width in pixels (each side)
+let NODE_COUNT  = 32;
+let NODE_SPACE  = 76;   // pixels between nodes
+let WIDTH_VAR   = 0.45; // 0–1
+
+// ── COLOURS ──────────────────────────────────────────────────────────────
+const ROAD_COLOR  = '#415c30';
+const FOREST_CORE = '#1a3010';
+const FOREST_MID  = '#233d1e';
+const FOREST_EDGE = '#2e4a26';
+
+// ── BAYER 4×4 ────────────────────────────────────────────────────────────
+const BAYER = [
+  [ 0,  8,  2, 10],
+  [12,  4, 14,  6],
+  [ 3, 11,  1,  9],
+  [15,  7, 13,  5]
+];
+
+// ── SEEDED RANDOM ─────────────────────────────────────────────────────────
+function seededRand(seed) {
+  let s = seed | 0;
+  return () => {
+    s = Math.imul(s ^ (s >>> 15), 0xd168aaad) | 0;
+    s = Math.imul(s ^ (s >>> 13), 0xaf723597) | 0;
+    return ((s ^ (s >>> 15)) >>> 0) / 0xFFFFFFFF;
+  };
+}
+
+// ── POINT-IN-POLYGON ──────────────────────────────────────────────────────
+function ptInPoly(px, py, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i][0], yi = poly[i][1];
+    const xj = poly[j][0], yj = poly[j][1];
+    if (((yi > py) !== (yj > py)) && px < (xj - xi) * (py - yi) / (yj - yi) + xi)
+      inside = !inside;
+  }
+  return inside;
+}
+
+// ── RASTERIZE ROAD POLYGON ────────────────────────────────────────────────
+// Paints ROAD_COLOR on the canvas over the forest background.
+// Solid interior, Bayer-dithered edge so forest pixels bleed through.
+function rasterizeRoad(poly) {
+  const px = PIXEL_SIZE, band = DITHER_BAND;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const [x, y] of poly) {
+    if (x < minX) minX = x; if (x > maxX) maxX = x;
+    if (y < minY) minY = y; if (y > maxY) maxY = y;
+  }
+  const W = canvas.width, H = canvas.height;
+  if (maxX < 0 || minX > W || maxY < 0 || minY > H) return;
+
+  const pad   = band + 1;
+  const cMinX = Math.floor(minX / px) - pad;
+  const cMinY = Math.floor(minY / px) - pad;
+  const cMaxX = Math.ceil (maxX / px) + pad;
+  const cMaxY = Math.ceil (maxY / px) + pad;
+  const cols  = cMaxX - cMinX;
+  const rows  = cMaxY - cMinY;
+  if (cols <= 0 || rows <= 0) return;
+
+  const grid = new Uint8Array(cols * rows);
+  for (let cj = 0; cj < rows; cj++) {
+    const sy = (cMinY + cj) * px + px * 0.5;
+    for (let ci = 0; ci < cols; ci++) {
+      const sx = (cMinX + ci) * px + px * 0.5;
+      if (ptInPoly(sx, sy, poly)) grid[cj * cols + ci] = 1;
+    }
+  }
+
+  const DIRS = [[1,0],[-1,0],[0,1],[0,-1]];
+  for (let cj = 0; cj < rows; cj++) {
+    for (let ci = 0; ci < cols; ci++) {
+      if (!grid[cj * cols + ci]) continue;
+      let depth = band;
+      for (const [dci, dcj] of DIRS) {
+        for (let d = 1; d <= band; d++) {
+          const ni = ci + dci * d, nj = cj + dcj * d;
+          const out = ni < 0 || ni >= cols || nj < 0 || nj >= rows || !grid[nj * cols + ni];
+          if (out) { if (d < depth) depth = d; break; }
+        }
+        if (depth === 1) break;
+      }
+      const sx = (cMinX + ci) * px, sy = (cMinY + cj) * px;
+      if (depth >= band) {
+        ctx.fillStyle = ROAD_COLOR;
+        ctx.fillRect(sx, sy, px, px);
+      } else {
+        const density = depth / band;
+        const bx = ((cMinX + ci) % 4 + 4) % 4;
+        const by = ((cMinY + cj) % 4 + 4) % 4;
+        if (BAYER[by][bx] / 16 < density) {
+          ctx.fillStyle = ROAD_COLOR;
+          ctx.fillRect(sx, sy, px, px);
+        }
+      }
+    }
+  }
+}
+
+// ── FOREST BACKGROUND ─────────────────────────────────────────────────────
+// Fills canvas with a Bayer-patterned forest so the road dither is visible.
+function drawForestBg() {
+  const px = PIXEL_SIZE;
+  for (let y = 0; y < canvas.height; y += px) {
+    for (let x = 0; x < canvas.width; x += px) {
+      const bx = (Math.floor(x / px) % 4 + 4) % 4;
+      const by = (Math.floor(y / px) % 4 + 4) % 4;
+      const v  = BAYER[by][bx] / 16;
+      ctx.fillStyle = v < 0.45 ? FOREST_CORE : v < 0.72 ? FOREST_MID : FOREST_EDGE;
+      ctx.fillRect(x, y, px, px);
+    }
+  }
+}
+
+// ── BUILD + RENDER ────────────────────────────────────────────────────────
+function render() {
+  const t0 = performance.now();
+  const W  = canvas.width, H = canvas.height;
+
+  // 1 — forest background
+  drawForestBg();
+
+  // 2 — build road nodes centered on canvas
+  const totalLen = NODE_COUNT * NODE_SPACE;
+  const startX   = (W - totalLen) / 2;
+  const centerY  = H / 2;
+
+  const rand  = seededRand(0x60AD1234);
+  const nodes = [];
+  for (let i = 0; i <= NODE_COUNT; i++) {
+    const x      = startX + i * NODE_SPACE;
+    const jitter = (rand() - 0.5) * 2 * WIDTH_VAR;
+    const halfW  = Math.max(ROAD_WIDTH * (1 + jitter), ROAD_WIDTH * 0.15);
+    nodes.push({ x, y: centerY, halfW });
+  }
+
+  // 3 — build polygon: left edge forward, right edge reversed
+  const left  = nodes.map(n => [n.x, n.y - n.halfW]);
+  const right = nodes.map(n => [n.x, n.y + n.halfW]);
+  const poly  = [...left, ...right.reverse()];
+
+  // 4 — rasterize road over forest
+  rasterizeRoad(poly);
+
+  // 5 — draw faint node markers so you can see control points
+  ctx.strokeStyle = 'rgba(200,176,96,0.35)';
+  ctx.lineWidth   = 1;
+  for (const n of nodes) {
+    ctx.beginPath();
+    ctx.moveTo(n.x, n.y - n.halfW - 8);
+    ctx.lineTo(n.x, n.y + n.halfW + 8);
+    ctx.stroke();
+  }
+
+  const ms = (performance.now() - t0).toFixed(1);
+  document.getElementById('perf').textContent = `${ms} ms · ${NODE_COUNT} nodes · ${Math.round(totalLen)}px section`;
+}
+
+// ── CONTROLS ──────────────────────────────────────────────────────────────
+function bind(id, valId, fn) {
+  const el  = document.getElementById(id);
+  const val = valId ? document.getElementById(valId) : null;
+  el.addEventListener('input', function() {
+    if (val) val.textContent = this.value;
+    fn(+this.value);
+    render();
+  });
+}
+
+bind('sl-px',    'v-px',    v => PIXEL_SIZE  = v);
+bind('sl-band',  'v-band',  v => DITHER_BAND = v);
+bind('sl-width', 'v-width', v => ROAD_WIDTH  = v);
+bind('sl-nodes', 'v-nodes', v => NODE_COUNT  = v);
+bind('sl-space', 'v-space', v => NODE_SPACE  = v);
+bind('sl-var',   'v-var',   v => WIDTH_VAR   = v / 100);
+
+window.addEventListener('resize', () => {
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+  render();
+});
+
+canvas.width  = window.innerWidth;
+canvas.height = window.innerHeight;
+render();
+</script>
+</body>
+</html>
