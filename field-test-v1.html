@@ -972,6 +972,19 @@ function spacedAnchors(candidates, originLat, originLng, opts) {
     ringBins[idx].push(c);
   }
 
+  // DIAGNOSTIC: count candidates by global sector for debug overlay
+  const globalSectorCounts = new Array(SECTORS).fill(0);
+  for (const c of candidates) {
+    if (distFromOrigin(c) > MAX_RANGE) continue;
+    const dlat = (c.lat - originLat) * mLat;
+    const dlng = (c.lng - originLng) * mLng;
+    let ang = Math.atan2(dlng, dlat);
+    if (ang < 0) ang += 2 * Math.PI;
+    const idx = Math.min(SECTORS - 1, Math.floor(ang / (2 * Math.PI) * SECTORS));
+    globalSectorCounts[idx]++;
+  }
+  window.__debugSectorCounts = globalSectorCounts;
+
   const kept = [];
   const roadCounts = new Map();
   const tooCloseToKept = c => kept.some(k => distM(c, k) < MIN_DIST);
@@ -1331,7 +1344,14 @@ function updateStatus(msg, anchorCount) {
   else txt.textContent = 'Expedition active';
   if (anchorCount !== undefined) {
     const vis = anchors.filter(a => !a.visited).length;
-    cnt.textContent = vis + ' anchors active';
+    let sectorBreakdown = '';
+    if (window.__debugSectorCounts) {
+      const labels = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+      sectorBreakdown = ' | ' + window.__debugSectorCounts
+        .map((n, i) => `${labels[i]}:${n}`)
+        .join(' ');
+    }
+    cnt.textContent = vis + ' anchors' + sectorBreakdown;
   }
 }
 
